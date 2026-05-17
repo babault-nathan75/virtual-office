@@ -5,17 +5,15 @@ import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import PasswordInput from '@/components/PasswordInput';
 
-export default function Connexion() {
+export default function MotDePasseOublie() {
   const router = useRouter();
   const [checkingSession, setCheckingSession] = useState(true);
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
+  const [message, setMessage] = useState({ text: '', type: '' });
 
-  // Un user déjà connecté n'a rien à faire sur la page de connexion
+  // Si déjà connecté, rediriger vers le dashboard
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
@@ -26,45 +24,24 @@ export default function Connexion() {
     });
   }, [router]);
 
-  const handleSignIn = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setErrorMsg('');
+    setMessage({ text: '', type: '' });
 
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const redirectTo = `${window.location.origin}/reinitialisation`;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
 
-    if (authError) {
-      setErrorMsg(authError.message);
-      setLoading(false);
-      return;
+    if (error) {
+      setMessage({ text: error.message, type: 'error' });
+    } else {
+      setMessage({
+        text: 'Si un compte existe avec cet email, un lien de réinitialisation vient d\'être envoyé. Vérifiez votre boîte (et les spams).',
+        type: 'success',
+      });
+      setEmail('');
     }
-
-    if (authData.user) {
-      const { data: profilData, error: profilError } = await supabase
-        .from('profils')
-        .select('role')
-        .eq('id', authData.user.id)
-        .single();
-
-      if (profilError) {
-        setErrorMsg("Erreur lors de la récupération du profil.");
-        setLoading(false);
-        return;
-      }
-
-      if (profilData.role === 'entreprise') {
-        router.push('/dashboard/entreprise');
-      } else if (profilData.role === 'secretaire') {
-        router.push('/dashboard/secretaire');
-      } else if (profilData.role === 'admin') {
-        router.push('/dashboard/admin');
-      } else {
-        router.push('/');
-      }
-    }
+    setLoading(false);
   };
 
   if (checkingSession) {
@@ -92,66 +69,53 @@ export default function Connexion() {
           </span>
         </Link>
         <h2 className="mt-6 text-3xl font-black tracking-tight text-slate-900">
-          Bon retour&nbsp;!
+          Mot de passe oublié&nbsp;?
         </h2>
         <p className="mt-2 text-sm text-slate-500 font-medium">
-          Connectez-vous à votre espace personnel.
+          Saisissez votre email, nous vous envoyons un lien pour le réinitialiser.
         </p>
       </div>
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-8 px-6 sm:px-10 rounded-3xl border border-slate-100 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.08)]">
 
-          {errorMsg && (
-            <div className="mb-6 p-4 bg-red-50 text-red-700 border border-red-200 rounded-xl text-sm text-center font-medium">
-              {errorMsg}
+          {message.text && (
+            <div className={`mb-6 p-4 rounded-xl text-sm font-medium text-center ${
+              message.type === 'error'
+                ? 'bg-red-50 text-red-700 border border-red-200'
+                : 'bg-green-50 text-green-700 border border-green-200'
+            }`}>
+              {message.text}
             </div>
           )}
 
-          <form onSubmit={handleSignIn} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1.5">Email</label>
+              <label className="block text-sm font-bold text-slate-700 mb-1.5">Adresse email</label>
               <input
                 type="email"
                 required
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={e => setEmail(e.target.value)}
                 className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="votre@email.com"
                 autoComplete="email"
               />
             </div>
 
-            <div>
-              <div className="flex items-baseline justify-between mb-1.5">
-                <label className="text-sm font-bold text-slate-700">Mot de passe</label>
-                <Link href="/mot-de-passe-oublie" className="text-xs font-bold text-blue-600 hover:underline">
-                  Oublié&nbsp;?
-                </Link>
-              </div>
-              <PasswordInput
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                autoComplete="current-password"
-              />
-            </div>
-
             <button
               type="submit"
               disabled={loading}
-              className="w-full mt-2 py-4 rounded-full text-white font-extrabold tracking-tight text-base transition shadow-lg shadow-blue-200 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed"
+              className="w-full mt-2 py-4 rounded-full text-white font-extrabold tracking-tight text-base bg-blue-600 hover:bg-blue-700 transition shadow-lg shadow-blue-200 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {loading ? 'Connexion en cours...' : 'Se connecter'}
+              {loading ? 'Envoi en cours...' : 'Envoyer le lien de réinitialisation'}
             </button>
           </form>
 
           <div className="mt-6 border-t border-slate-100 pt-6 text-center">
             <p className="text-sm text-slate-600 font-medium">
-              Pas encore de compte&nbsp;?{' '}
-              <Link href="/inscription" className="font-bold text-blue-600 hover:underline">
-                S&apos;inscrire
+              <Link href="/connexion" className="font-bold text-blue-600 hover:underline">
+                ← Retour à la connexion
               </Link>
             </p>
           </div>

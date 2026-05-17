@@ -22,10 +22,24 @@ type Mission = {
 };
 
 type DetailsProfil = {
+  photo_url: string | null;
+  bio: string | null;
+  ville: string | null;
+  disponibilite: string | null;
+  niveau_etudes: string | null;
+  langues: string[] | null;
+  outils: string[] | null;
+  soft_skills: string[] | null;
   competences: string[];
   annees_experience: number;
-  tarif_journalier: number;
 } | null;
+
+const DISPO_LABEL: Record<string, string> = {
+  immediate: 'Immédiate',
+  semaine: 'Sous une semaine',
+  mois: 'Sous un mois',
+  a_discuter: 'À discuter',
+};
 
 export default function DashboardEntreprise() {
   const router = useRouter();
@@ -68,14 +82,35 @@ export default function DashboardEntreprise() {
     fetchDonnees();
   }, [router]);
 
-  const gererCandidature = async (candidatureId: number, nouveauStatut: string, missionId: number) => {
-    const { error } = await supabase.from('candidatures').update({ statut: nouveauStatut }).eq('id', candidatureId);
+  const refuserCandidature = async (candidatureId: number) => {
+    const { error } = await supabase.from('candidatures').update({ statut: 'refusee' }).eq('id', candidatureId);
     if (error) return alert(error.message);
+    window.location.reload();
+  };
 
-    if (nouveauStatut === 'acceptee') {
-      await supabase.from('missions').update({ statut: 'en_cours' }).eq('id', missionId);
+  const proposerOffre = async (candidatureId: number, secretaireId: string, missionId: number) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return alert('Vous devez être connecté.');
+
+    const { error: offErr } = await supabase.from('offres').insert({
+      entreprise_id: session.user.id,
+      secretaire_id: secretaireId,
+      mission_id: missionId,
+      candidature_id: candidatureId,
+      statut: 'en_attente',
+    });
+
+    if (offErr) {
+      if (offErr.code === '23505') {
+        return alert('Une offre est déjà en attente pour cette secrétaire.');
+      }
+      return alert('Erreur : ' + offErr.message);
     }
-    window.location.reload(); // Rechargement simple pour mettre à jour l'UI et les stats
+
+    // La candidature est marquée comme acceptée, mais la mission reste ouverte
+    // tant que l'admin n'a pas conclu l'offre (le trigger fermera la mission à ce moment-là)
+    await supabase.from('candidatures').update({ statut: 'acceptee' }).eq('id', candidatureId);
+    window.location.reload();
   };
 
   const ouvrirProfil = async (secretaireId: string, secretaireNom: string) => {
@@ -98,9 +133,14 @@ export default function DashboardEntreprise() {
             <h1 className="text-3xl font-extrabold text-gray-900">Espace Entreprise — {nom}</h1>
             <p className="text-gray-500">Gérez vos missions et vos recrutements en un coup d'œil.</p>
           </div>
-          <Link href="/dashboard/entreprise/nouvelle-mission" className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-100 transition flex items-center gap-2">
-            <span>+</span> Publier une mission
-          </Link>
+          <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+            <Link href="/dashboard/entreprise/chercher" className="bg-white border-2 border-blue-200 text-blue-700 px-6 py-3 rounded-xl font-bold hover:border-blue-600 hover:bg-blue-50 transition flex items-center justify-center gap-2">
+              🔍 Trouver une secrétaire
+            </Link>
+            <Link href="/dashboard/entreprise/nouvelle-mission" className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-100 transition flex items-center justify-center gap-2">
+              <span>+</span> Publier une mission
+            </Link>
+          </div>
         </div>
 
         {/* SECTION STATS */}
@@ -151,21 +191,38 @@ export default function DashboardEntreprise() {
                         const secretaire = Array.isArray(cand.profils) ? cand.profils[0] : cand.profils;
                         if (!secretaire) return null;
                         return (
-                          <div key={cand.id} className="flex items-center justify-between p-4 bg-white border border-gray-100 rounded-xl hover:border-blue-200 transition">
-                            <div>
-                              <p className="font-bold text-gray-800">{secretaire.nom}</p>
-                              <button onClick={() => ouvrirProfil(secretaire.id, secretaire.nom)} className="text-blue-600 text-xs font-bold hover:underline">Voir le profil</button>
-                            </div>
-                            
-                            {cand.statut === 'en_attente' ? (
-                              <div className="flex gap-2">
-                                <button onClick={() => gererCandidature(cand.id, 'acceptee', mission.id)} className="p-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">✓</button>
-                                <button onClick={() => gererCandidature(cand.id, 'refusee', mission.id)} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition">✕</button>
+                          <div key={cand.id} className="flex flex-col gap-3 p-4 bg-white border border-gray-100 rounded-xl hover:border-blue-200 transition">
+                            <div className="flex justify-between items-start gap-3">
+                              <div className="min-w-0">
+                                <p className="font-bold text-gray-800 truncate">{secretaire.nom}</p>
+                                <button onClick={() => ouvrirProfil(secretaire.id, secretaire.nom)} className="text-blue-600 text-xs font-bold hover:underline">Voir le profil</button>
                               </div>
-                            ) : (
-                              <span className={`text-[10px] font-black px-2 py-1 rounded-md ${cand.statut === 'acceptee' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                {cand.statut.toUpperCase()}
-                              </span>
+                              {cand.statut !== 'en_attente' && (
+                                <span className={`text-[10px] font-black px-2 py-1 rounded-md whitespace-nowrap ${
+                                  cand.statut === 'acceptee'
+                                    ? 'bg-emerald-100 text-emerald-700'
+                                    : 'bg-red-100 text-red-700'
+                                }`}>
+                                  {cand.statut === 'acceptee' ? '✓ Offre envoyée' : 'Refusée'}
+                                </span>
+                              )}
+                            </div>
+
+                            {cand.statut === 'en_attente' && (
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => proposerOffre(cand.id, secretaire.id, mission.id)}
+                                  className="flex-1 bg-blue-600 text-white text-xs font-extrabold tracking-tight px-3 py-2 rounded-lg hover:bg-blue-700 transition"
+                                >
+                                  Proposer une offre
+                                </button>
+                                <button
+                                  onClick={() => refuserCandidature(cand.id)}
+                                  className="bg-red-50 text-red-600 text-xs font-bold px-3 py-2 rounded-lg hover:bg-red-100 transition"
+                                >
+                                  Refuser
+                                </button>
+                              </div>
                             )}
                           </div>
                         );
@@ -187,31 +244,117 @@ export default function DashboardEntreprise() {
               <h3 className="text-xl font-bold text-gray-800">Profil de {selectedSecretaire.nom}</h3>
               <button onClick={() => setSelectedSecretaire(null)} className="text-gray-400 hover:text-black text-2xl font-light">&times;</button>
             </div>
-            <div className="p-8">
+            <div className="p-8 max-h-[75vh] overflow-y-auto">
               {loadingDetails ? <p className="text-center text-gray-500">Chargement...</p> : detailsProfil ? (
                 <div className="space-y-6">
-                  <div className="flex justify-between items-center bg-blue-50 p-4 rounded-2xl">
-                    <div className="text-center">
-                      <p className="text-[10px] text-blue-400 uppercase font-bold">Expérience</p>
-                      <p className="text-xl font-black text-blue-900">{detailsProfil.annees_experience} ans</p>
+
+                  {/* Photo + bio */}
+                  <div className="flex gap-4 items-start">
+                    <div className="w-20 h-20 rounded-2xl bg-slate-100 border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center text-3xl">
+                      {detailsProfil.photo_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={detailsProfil.photo_url} alt="Photo" className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-slate-300">👤</span>
+                      )}
                     </div>
-                    <div className="h-8 w-[1px] bg-blue-200"></div>
-                    <div className="text-center">
-                      <p className="text-[10px] text-blue-400 uppercase font-bold">Tarif Journalier</p>
-                      <p className="text-xl font-black text-blue-900">{detailsProfil.tarif_journalier} <small className="text-xs font-normal">CFA</small></p>
+                    <div className="flex-1 min-w-0">
+                      {detailsProfil.bio ? (
+                        <p className="text-sm text-slate-700 leading-relaxed italic">{detailsProfil.bio}</p>
+                      ) : (
+                        <p className="text-sm text-slate-400 italic">Aucune bio renseignée.</p>
+                      )}
                     </div>
                   </div>
-                  <div>
-                    <p className="text-xs font-bold text-gray-400 uppercase mb-3">Compétences</p>
-                    <div className="flex flex-wrap gap-2">
-                      {detailsProfil.competences?.map((c, i) => <span key={i} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-medium">{c}</span>)}
+
+                  {/* Mini-fiche infos */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-slate-50 p-3 rounded-xl">
+                      <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-0.5">Ville</p>
+                      <p className="text-sm font-bold text-slate-800 truncate">{detailsProfil.ville || '—'}</p>
+                    </div>
+                    <div className="bg-slate-50 p-3 rounded-xl">
+                      <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-0.5">Disponibilité</p>
+                      <p className="text-sm font-bold text-slate-800 truncate">
+                        {detailsProfil.disponibilite ? DISPO_LABEL[detailsProfil.disponibilite] ?? detailsProfil.disponibilite : '—'}
+                      </p>
+                    </div>
+                    <div className="bg-slate-50 p-3 rounded-xl">
+                      <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-0.5">Niveau d&apos;études</p>
+                      <p className="text-sm font-bold text-slate-800 truncate">{detailsProfil.niveau_etudes || '—'}</p>
+                    </div>
+                    <div className="bg-slate-50 p-3 rounded-xl">
+                      <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-0.5">Expérience</p>
+                      <p className="text-sm font-bold text-slate-800 truncate">{detailsProfil.annees_experience} ans</p>
                     </div>
                   </div>
-                  <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-100 text-center">
-                    <p className="text-xs text-yellow-800 leading-relaxed italic">Acceptez sa candidature pour débloquer son numéro de téléphone et son email.</p>
+
+                  {/* Tarif négocié par la plateforme */}
+                  <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
+                    <p className="text-[10px] text-blue-500 uppercase font-bold tracking-widest mb-1">💼 Tarif</p>
+                    <p className="text-sm text-blue-900 font-medium leading-relaxed">
+                      Le tarif de la prestation est fixé par la plateforme lors de la mise en relation,
+                      en fonction du volume et du type de mission.
+                    </p>
+                  </div>
+
+                  {/* Compétences libres */}
+                  {detailsProfil.competences?.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Compétences</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {detailsProfil.competences.map((c, i) => (
+                          <span key={i} className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg text-xs font-bold">{c}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Outils */}
+                  {(detailsProfil.outils?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Outils maîtrisés</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {detailsProfil.outils!.map((o, i) => (
+                          <span key={i} className="bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg text-xs font-bold">{o}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Soft skills */}
+                  {(detailsProfil.soft_skills?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Soft skills</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {detailsProfil.soft_skills!.map((s, i) => (
+                          <span key={i} className="bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg text-xs font-bold">{s}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Langues */}
+                  {(detailsProfil.langues?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Langues</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {detailsProfil.langues!.map((l, i) => (
+                          <span key={i} className="bg-amber-50 text-amber-800 px-2.5 py-1 rounded-lg text-xs font-bold">{l}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Confidentialité — coordonnées masquées */}
+                  <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 text-center">
+                    <p className="text-xs text-amber-900 leading-relaxed font-medium">
+                      🔒 Pour des raisons de confidentialité, le numéro de téléphone et les coordonnées
+                      personnelles restent <b>masqués</b>. Acceptez la candidature pour déclencher la mise en relation par la plateforme.
+                    </p>
                   </div>
                 </div>
-              ) : <p className="text-center text-gray-400 italic text-sm">Ce profil n'est pas encore complété.</p>}
+              ) : <p className="text-center text-gray-400 italic text-sm">Ce profil n&apos;est pas encore complété.</p>}
             </div>
           </div>
         </div>

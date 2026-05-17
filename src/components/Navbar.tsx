@@ -3,8 +3,17 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { User } from '@supabase/supabase-js';
+import NotificationBell from '@/components/NotificationBell';
+
+type UserMetadata = {
+  first_name?: string;
+  last_name?: string;
+  full_name?: string;
+  avatar_url?: string;
+};
 
 export default function Navbar() {
   const [user, setUser] = useState<User | null>(null);
@@ -38,9 +47,16 @@ export default function Navbar() {
         <div className="flex justify-between h-16 items-center">
           
           {/* LOGO */}
-          <Link href="/" className="text-2xl font-extrabold text-blue-900 flex items-center gap-2">
-            <span className="bg-blue-600 text-white p-1 rounded-lg text-lg">SP</span>
-            Secrétariat<span className="text-blue-500">Pro</span>
+          <Link href="/" className="text-base sm:text-xl md:text-2xl font-extrabold text-blue-900 flex items-center gap-2 shrink-0">
+            <Image
+              src="/logo.png"
+              alt="Logo SecrétariatPro"
+              width={44}
+              height={44}
+              priority
+              className="rounded-lg object-contain w-9 h-9 sm:w-11 sm:h-11"
+            />
+            <span className="hidden sm:inline">Secrétariat<span className="text-blue-500">Pro</span></span>
           </Link>
 
           {/* LIENS DE NAVIGATION */}
@@ -48,18 +64,29 @@ export default function Navbar() {
             {user ? (
               <>
                 {/* SI CONNECTÉ */}
-                <Link 
-                  href="/dashboard" 
+                <Link
+                  href="/dashboard"
                   className="text-sm font-semibold text-gray-700 hover:text-blue-600 transition"
+                  aria-label="Mon tableau de bord"
                 >
-                  🏠 Mon Tableau de bord
+                  <span aria-hidden>🏠</span>
+                  <span className="hidden md:inline ml-1">Mon Tableau de bord</span>
                 </Link>
-                <button 
-                  onClick={handleLogout}
-                  className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-100 transition"
-                >
-                  Déconnexion
-                </button>
+                <NotificationBell />
+                {/* Profil connecté: photo + nom & prenom */}
+                <Link href="/profile" className="flex items-center gap-3">
+                  <Image
+                    src={((user.user_metadata as unknown) as UserMetadata)?.avatar_url || '/avatar-placeholder.png'}
+                    alt="Profil"
+                    width={40}
+                    height={40}
+                    className="rounded-full object-cover"
+                  />
+                  <span className="hidden sm:inline text-sm font-semibold text-gray-700 max-w-[140px] truncate">
+                    {(((user.user_metadata as unknown) as UserMetadata)?.first_name || ((user.user_metadata as unknown) as UserMetadata)?.full_name || '') +
+                      ((((user.user_metadata as unknown) as UserMetadata)?.last_name) ? ' ' + ((user.user_metadata as unknown) as UserMetadata).last_name : '')}
+                  </span>
+                </Link>
               </>
             ) : (
               <>
