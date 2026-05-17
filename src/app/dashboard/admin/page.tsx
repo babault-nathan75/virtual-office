@@ -30,7 +30,8 @@ export default function DashboardAdmin() {
   const [loading, setLoading] = useState(true);
   const [erreur, setErreur] = useState('');
   const [offresEnAttente, setOffresEnAttente] = useState<Offre[]>([]);
-  const [stats, setStats] = useState({ enAttente: 0, conclues: 0 });
+  // Ajout de nbSecretaires et nbEntreprises dans le state des statistiques
+  const [stats, setStats] = useState({ enAttente: 0, conclues: 0, nbSecretaires: 0, nbEntreprises: 0 });
   const [acting, setActing] = useState<number | null>(null);
 
   useEffect(() => {
@@ -52,10 +53,22 @@ export default function DashboardAdmin() {
         .eq('statut', 'en_attente')
         .order('created_at', { ascending: false });
 
-      // Stat : nombre d'offres conclues (historique court)
+      // Stat : nombre d'offres conclues
       const { count: conclues } = await supabase
         .from('offres')
         .select('id', { count: 'exact', head: true })
+        .eq('statut', 'concluee');
+
+      // Récupération du nombre d'entreprises distinctes ayant une offre conclue
+      const { count: countEntreprises } = await supabase
+        .from('offres')
+        .select('entreprise_id', { count: 'exact', head: true })
+        .eq('statut', 'concluee');
+
+      // Récupération du nombre de secrétaires distinctes ayant une offre conclue
+      const { count: countSecretaires } = await supabase
+        .from('offres')
+        .select('secretaire_id', { count: 'exact', head: true })
         .eq('statut', 'concluee');
 
       if (offresRaw && offresRaw.length > 0) {
@@ -73,7 +86,12 @@ export default function DashboardAdmin() {
         })) as unknown as Offre[]);
       }
 
-      setStats({ enAttente: offresRaw?.length ?? 0, conclues: conclues ?? 0 });
+      setStats({ 
+        enAttente: offresRaw?.length ?? 0, 
+        conclues: conclues ?? 0,
+        nbEntreprises: countEntreprises ?? 0,
+        nbSecretaires: countSecretaires ?? 0
+      });
       setLoading(false);
     };
     run();
@@ -89,8 +107,11 @@ export default function DashboardAdmin() {
     }
     setOffresEnAttente(prev => prev.filter(o => o.id !== offreId));
     setStats(prev => ({
+      ...prev,
       enAttente: prev.enAttente - 1,
       conclues: prev.conclues + (nouveauStatut === 'concluee' ? 1 : 0),
+      // Note: Pour une mise à jour ultra-précise en temps réel des comptes d'utilisateurs uniques, 
+      // un re-fetch complet serait idéal. À défaut, on maintient les anciennes valeurs ici.
     }));
     setActing(null);
   };
@@ -135,10 +156,18 @@ export default function DashboardAdmin() {
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Offres à traiter</p>
             <p className="text-4xl font-black text-slate-900">{stats.enAttente}</p>
           </div>
+          
+          {/* Card modifiée avec l'ajout des secrétaires et entreprises */}
           <div className="bg-emerald-600 p-6 rounded-2xl text-white shadow-lg shadow-emerald-200">
             <p className="text-[10px] font-black text-emerald-200 uppercase tracking-widest mb-1">Mises en relation conclues</p>
-            <p className="text-4xl font-black">{stats.conclues}</p>
+            <div className="flex items-baseline justify-between">
+              <p className="text-4xl font-black">{stats.conclues}</p>
+              <p className="text-xs font-medium text-emerald-100 bg-emerald-700/50 px-2.5 py-1 rounded-lg">
+                🏢 {stats.nbEntreprises} {stats.nbEntreprises > 1 ? 'entreprises' : 'entreprise'} | 👩‍💻 {stats.nbSecretaires} {stats.nbSecretaires > 1 ? 'secrétaires' : 'secrétaire'}
+              </p>
+            </div>
           </div>
+          
           <Link href="/" className="bg-white p-6 rounded-2xl border border-slate-100 hover:border-blue-300 transition flex items-center justify-center text-blue-700 font-bold">
             Voir le site public →
           </Link>
