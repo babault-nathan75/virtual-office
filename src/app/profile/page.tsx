@@ -427,6 +427,20 @@ export default function Profile() {
           </button>
         </div>
 
+        {/* SUPPRESSION DE COMPTE */}
+        <div className="bg-white rounded-3xl border border-red-100 shadow-[0_15px_30px_rgba(0,0,0,0.03)] p-8">
+          <h2 className="text-lg font-black tracking-tight text-red-900 mb-2">Zone dangereuse</h2>
+          <p className="text-sm text-slate-500 font-medium mb-5">
+            La suppression de votre compte est irréversible.
+          </p>
+          <Link
+            href="/dashboard/supprimer-compte"
+            className="block text-center py-3.5 rounded-full bg-red-600 hover:bg-red-700 text-white font-extrabold tracking-tight text-sm transition shadow-lg shadow-red-200"
+          >
+            Supprimer mon compte
+          </Link>
+        </div>
+
         {profil.created_at && (
           <p className="text-center text-xs text-slate-400 font-medium pt-2">
             Membre depuis le {new Date(profil.created_at).toLocaleDateString('fr-FR')}

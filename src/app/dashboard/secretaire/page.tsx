@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { toast } from '@/components/Toast';
+import NotificationBell from '@/components/NotificationBell';
 
 type Mission = {
   id: number;
@@ -70,6 +72,7 @@ function computeScore(p: Record<string, unknown> | null) {
 export default function DashboardSecretaire() {
   const router = useRouter();
   const [nom, setNom] = useState('');
+  const [userId, setUserId] = useState('');
   const [photoUrl, setPhotoUrl] = useState<string>('');
   const [missions, setMissions] = useState<Mission[]>([]);
   const [mesCandidatures, setMesCandidatures] = useState<Candidature[]>([]);
@@ -84,34 +87,31 @@ export default function DashboardSecretaire() {
         router.push('/connexion');
         return;
       }
+      setUserId(session.user.id);
 
-      const { data: profil } = await supabase.from('profils').select('nom').eq('id', session.user.id).single();
-      if (profil) setNom(profil.nom);
+      // Requêtes en parallèle
+      const [profilRes, missionsRes, candidaturesRes, metierRes] = await Promise.all([
+        supabase.from('profils').select('nom').eq('id', session.user.id).single(),
+        supabase.from('missions')
+          .select('id, titre, description, date_debut, profils(nom)')
+          .eq('statut', 'ouverte')
+          .order('created_at', { ascending: false }),
+        supabase.from('candidatures')
+          .select('mission_id, statut, missions(titre)')
+          .eq('secretaire_id', session.user.id),
+        supabase.from('profils_secretaires')
+          .select('photo_url, bio, ville, disponibilite, niveau_etudes, langues, outils, soft_skills, competences, annees_experience')
+          .eq('id', session.user.id)
+          .single(),
+      ]);
 
-      const { data: missionsOuvertes } = await supabase
-        .from('missions')
-        .select('id, titre, description, date_debut, profils(nom)')
-        .eq('statut', 'ouverte')
-        .order('created_at', { ascending: false });
-
-      const { data: candidatures } = await supabase
-        .from('candidatures')
-        .select('mission_id, statut, missions(titre)')
-        .eq('secretaire_id', session.user.id);
-
-      const { data: metier } = await supabase
-        .from('profils_secretaires')
-        .select('*')
-        .eq('id', session.user.id)
-        .single();
-
-      if (metier) {
-        setPhotoUrl(metier.photo_url ?? '');
-        setCompletion(computeScore(metier));
+      if (profilRes.data) setNom(profilRes.data.nom);
+      if (metierRes.data) {
+        setPhotoUrl(metierRes.data.photo_url ?? '');
+        setCompletion(computeScore(metierRes.data));
       }
-
-      if (missionsOuvertes) setMissions(missionsOuvertes as unknown as Mission[]);
-      if (candidatures) setMesCandidatures(candidatures as unknown as Candidature[]);
+      if (missionsRes.data) setMissions(missionsRes.data as unknown as Mission[]);
+      if (candidaturesRes.data) setMesCandidatures(candidaturesRes.data as unknown as Candidature[]);
 
       // Offres reçues par la secrétaire (avec nom de l'entreprise)
       const { data: offresRaw } = await supabase
@@ -139,10 +139,28 @@ export default function DashboardSecretaire() {
   const postuler = async (missionId: number) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
+
+    // Mise à jour optimiste
+    const mission = missions.find(m => m.id === missionId);
+    if (mission) {
+      setMesCandidatures(prev => [...prev, { mission_id: missionId, statut: 'en_attente', missions: { titre: mission.titre } }]);
+    }
+
     const { error } = await supabase.from('candidatures').insert([
       { mission_id: missionId, secretaire_id: session.user.id, statut: 'en_attente' },
     ]);
-    if (!error) window.location.reload();
+
+    if (error) {
+      // Rollback
+      setMesCandidatures(prev => prev.filter(c => c.mission_id !== missionId));
+      if (error.code === '23505') {
+        toast.error('Vous avez déjà postulé à cette mission.');
+      } else {
+        toast.error('Erreur : ' + error.message);
+      }
+    } else {
+      toast.success('Candidature envoyée !');
+    }
   };
 
   if (loading) return <div className="p-8 text-center font-medium text-slate-500">Chargement...</div>;
@@ -153,7 +171,7 @@ export default function DashboardSecretaire() {
 
         {/* Header & progression */}
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-[0_15px_30px_rgba(0,0,0,0.03)] mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-          <div className="flex items-center gap-5 flex-1 w-full">
+          <div className="flex items-center gap-4 flex-1 w-full">
             {/* Avatar */}
             <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br from-blue-100 to-blue-50 border border-slate-100 overflow-hidden shrink-0 flex items-center justify-center text-2xl">
               {photoUrl ? (
@@ -165,7 +183,14 @@ export default function DashboardSecretaire() {
             </div>
 
             <div className="flex-1">
-              <h1 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900">Bonjour, {nom} 👋</h1>
+              <div className="flex items-center gap-3">
+                <h1 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900">Bonjour, {nom} 👋</h1>
+                {userId && (
+                  <div className="relative">
+                    <NotificationBell userId={userId} role="secretaire" />
+                  </div>
+                )}
+              </div>
               <div className="mt-3 max-w-md">
                 <div className="flex justify-between mb-1.5">
                   <span className="text-sm font-bold text-blue-700">Profil complété à {completion}%</span>
@@ -195,6 +220,18 @@ export default function DashboardSecretaire() {
             className="w-full md:w-auto text-center bg-blue-600 text-white px-6 py-3 rounded-full font-extrabold tracking-tight hover:bg-blue-700 transition shadow-lg shadow-blue-200"
           >
             ⚙️ Modifier mon profil
+          </Link>
+          <Link
+            href="/dashboard/messages"
+            className="w-full md:w-auto text-center bg-white border border-slate-200 text-slate-700 px-6 py-3 rounded-full font-bold hover:border-blue-300 hover:bg-blue-50 transition"
+          >
+            💬 Messages
+          </Link>
+          <Link
+            href="/dashboard/secretaire/avis"
+            className="w-full md:w-auto text-center bg-amber-50 text-amber-700 border border-amber-200 px-6 py-3 rounded-full font-bold hover:bg-amber-100 transition"
+          >
+            ⭐ Mes avis
           </Link>
         </div>
 

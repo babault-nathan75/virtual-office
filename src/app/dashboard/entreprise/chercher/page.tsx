@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useDebounce } from '@/hooks/useDebounce';
 
 // ============================================================
 // Constantes
@@ -200,12 +201,24 @@ function ChipMultiSelect({
 // Page
 // ============================================================
 
+type AIScore = {
+  score: number;
+  explication: string;
+  points_forts: string[];
+  points_a_verifier: string[];
+};
+
 export default function ChercherSecretaire() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [secretaires, setSecretaires] = useState<Secretaire[]>([]);
   const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
   const [openProfile, setOpenProfile] = useState<Secretaire | null>(null);
+  const [useAI, setUseAI] = useState(false);
+  const [aiScores, setAiScores] = useState<Record<string, AIScore>>({});
+  const [loadingAI, setLoadingAI] = useState(false);
+
+  const debouncedQ = useDebounce(filters.q, 300);
 
   // ----- Auth + fetch ---------------------------------------------------------
 
@@ -217,16 +230,27 @@ export default function ChercherSecretaire() {
         return;
       }
 
+      // IDs des secrétaires avec KYC approuvé
+      const { data: approvedKycs } = await supabase
+        .from('kyc_verifications')
+        .select('user_id')
+        .eq('status', 'approved')
+        .eq('type_compte', 'secretaire');
+
+      const approvedIds = (approvedKycs ?? []).map(k => k.user_id);
+
       // Profils des secrétaires (nom seulement — surtout pas email/tel)
       const { data: profils } = await supabase
         .from('profils')
         .select('id, nom')
-        .eq('role', 'secretaire');
+        .eq('role', 'secretaire')
+        .in('id', approvedIds.length > 0 ? approvedIds : ['__none__']);
 
       // Données métier
       const { data: metiers } = await supabase
         .from('profils_secretaires')
-        .select('id, photo_url, bio, ville, disponibilite, niveau_etudes, langues, outils, soft_skills, competences, annees_experience');
+        .select('id, photo_url, bio, ville, disponibilite, niveau_etudes, langues, outils, soft_skills, competences, annees_experience')
+        .in('id', approvedIds.length > 0 ? approvedIds : ['__none__']);
 
       // Merge
       const merged: Secretaire[] = (profils ?? []).map(p => {
@@ -240,13 +264,51 @@ export default function ChercherSecretaire() {
     fetchAll();
   }, [router]);
 
+  // ----- Fetch scores IA (batch) ---------------------------------------------
+
+  const fetchAIScores = async () => {
+    setLoadingAI(true);
+    const scores: Record<string, AIScore> = {};
+    try {
+      // Traiter par batchs de 10
+      for (let i = 0; i < secretaires.length; i += 10) {
+        const batch = secretaires.slice(i, i + 10);
+        const res = await fetch('/api/match-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secretaires: batch, filters }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          Object.assign(scores, data.results);
+        }
+      }
+    } catch {
+      // En cas d'erreur, on garde le score local
+    }
+    setAiScores(scores);
+    setLoadingAI(false);
+  };
+
   // ----- Tri + scoring (mémo) -------------------------------------------------
 
   const results = useMemo(() => {
     return secretaires
-      .map(s => ({ ...s, ...scoreSecretaire(s, filters) }))
+      .map(s => {
+        const local = scoreSecretaire(s, { ...filters, q: debouncedQ });
+        const ai = useAI ? aiScores[s.id] : undefined;
+        return {
+          ...s,
+          score: ai?.score ?? local.score,
+          match: ai?.score ?? local.match,
+          aiExplication: ai?.explication,
+          aiPointsForts: ai?.points_forts,
+          aiPointsAVerifier: ai?.points_a_verifier,
+          isAI: !!ai,
+        };
+      })
       .sort((a, b) => b.score - a.score);
-  }, [secretaires, filters]);
+  }, [secretaires, filters, debouncedQ, useAI, aiScores]);
 
   const activeFiltersCount =
     (filters.q ? 1 : 0) +
@@ -295,6 +357,45 @@ export default function ChercherSecretaire() {
             >
               Réinitialiser les filtres ({activeFiltersCount})
             </button>
+          )}
+        </div>
+
+        {/* Toggle IA */}
+        <div className="mb-6 flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => {
+              setUseAI(!useAI);
+              if (!useAI && Object.keys(aiScores).length === 0) {
+                fetchAIScores();
+              }
+            }}
+            disabled={loadingAI}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-full font-bold text-sm transition ${
+              useAI
+                ? 'bg-purple-600 text-white shadow-lg shadow-purple-200'
+                : 'bg-white text-slate-700 border-2 border-slate-200 hover:border-purple-300'
+            } ${loadingAI ? 'opacity-60 cursor-wait' : ''}`}
+          >
+            {loadingAI ? (
+              <>
+                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+                </svg>
+                Analyse IA en cours...
+              </>
+            ) : (
+              <>
+                <span className="text-lg">✨</span>
+                Matching IA {useAI ? 'activé' : ''}
+              </>
+            )}
+          </button>
+          {useAI && !loadingAI && (
+            <span className="text-xs text-purple-600 font-bold">
+              {Object.keys(aiScores).length} profil{Object.keys(aiScores).length > 1 ? 's' : ''} analysé{Object.keys(aiScores).length > 1 ? 's' : ''}
+            </span>
           )}
         </div>
 
@@ -431,7 +532,7 @@ export default function ChercherSecretaire() {
 // ResultCard
 // ============================================================
 
-function ResultCard({ s, onOpen }: { s: Secretaire & { match: number; score: number }; onOpen: () => void }) {
+function ResultCard({ s, onOpen }: { s: Secretaire & { match: number; score: number; aiExplication?: string; aiPointsForts?: string[]; aiPointsAVerifier?: string[]; isAI?: boolean }; onOpen: () => void }) {
   const matchStyle =
     s.match >= 80 ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
     s.match >= 50 ? 'bg-blue-100 text-blue-700 border-blue-200' :
@@ -456,10 +557,36 @@ function ResultCard({ s, onOpen }: { s: Secretaire & { match: number; score: num
         <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full border ${matchStyle}`}>
           {s.match}% match
         </span>
+        {s.isAI && (
+          <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full bg-purple-100 text-purple-700 border border-purple-200">
+            ✨ IA
+          </span>
+        )}
       </div>
 
       {s.bio && (
         <p className="text-sm text-slate-600 line-clamp-2 italic mb-3">« {s.bio} »</p>
+      )}
+
+      {s.aiExplication && (
+        <div className="bg-purple-50 p-3 rounded-xl border border-purple-100 mb-3">
+          <p className="text-xs font-bold text-purple-700 uppercase tracking-widest mb-1">Analyse IA</p>
+          <p className="text-sm text-purple-900 font-medium">{s.aiExplication}</p>
+          {s.aiPointsForts && s.aiPointsForts.length > 0 && (
+            <div className="mt-2">
+              {s.aiPointsForts.map((pf, i) => (
+                <p key={i} className="text-xs text-emerald-700 font-medium">✓ {pf}</p>
+              ))}
+            </div>
+          )}
+          {s.aiPointsAVerifier && s.aiPointsAVerifier.length > 0 && (
+            <div className="mt-1">
+              {s.aiPointsAVerifier.map((pv, i) => (
+                <p key={i} className="text-xs text-amber-600 font-medium">⚠ {pv}</p>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {(s.outils?.length ?? 0) > 0 && (

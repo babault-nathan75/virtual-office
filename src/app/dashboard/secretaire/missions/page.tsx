@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useDebounce } from '@/hooks/useDebounce';
 
 type Mission = {
   id: number;
@@ -19,6 +20,13 @@ type Candidature = {
   mission_id: number;
 };
 
+type AIScore = {
+  score: number;
+  explication: string;
+  points_forts: string[];
+  points_a_verifier: string[];
+};
+
 export default function RechercherPoste() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
@@ -28,6 +36,11 @@ export default function RechercherPoste() {
   const [q, setQ] = useState('');
   const [postulating, setPostulating] = useState<number | null>(null);
   const [message, setMessage] = useState({ text: '', type: '' });
+  const [useAI, setUseAI] = useState(false);
+  const [aiScores, setAiScores] = useState<Record<number, AIScore>>({});
+  const [loadingAI, setLoadingAI] = useState(false);
+
+  const debouncedQ = useDebounce(q, 300);
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -38,11 +51,21 @@ export default function RechercherPoste() {
       }
       setUserId(session.user.id);
 
-      // Toutes les missions ouvertes (RLS filtre déjà côté DB)
+      // IDs des entreprises avec KYC approuvé
+      const { data: approvedKycs } = await supabase
+        .from('kyc_verifications')
+        .select('user_id')
+        .eq('status', 'approved')
+        .eq('type_compte', 'entreprise');
+
+      const approvedEntIds = (approvedKycs ?? []).map(k => k.user_id);
+
+      // Toutes les missions ouvertes des entreprises vérifiées
       const { data: ms } = await supabase
         .from('missions')
         .select('id, titre, description, date_debut, date_fin, created_at, profils(nom)')
         .eq('statut', 'ouverte')
+        .in('entreprise_id', approvedEntIds.length > 0 ? approvedEntIds : ['__none__'])
         .order('created_at', { ascending: false });
 
       // Mes candidatures pour savoir où j'ai déjà postulé
@@ -58,17 +81,50 @@ export default function RechercherPoste() {
     fetchAll();
   }, [router]);
 
+  // ----- Fetch scores IA pour les missions -----------------------------------
+
+  const fetchAIScores = async () => {
+    if (!userId || missions.length === 0) return;
+    setLoadingAI(true);
+    const scores: Record<number, AIScore> = {};
+    for (const m of missions) {
+      try {
+        const res = await fetch('/api/match-secretaire-mission', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secretaireId: userId, mission: m }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          scores[m.id] = data;
+        }
+      } catch {
+        // En cas d'erreur, on garde le tri par défaut
+      }
+    }
+    setAiScores(scores);
+    setLoadingAI(false);
+  };
+
+  // ----- Filtrage + tri IA ---------------------------------------------------
+
   const filtered = useMemo(() => {
-    if (!q.trim()) return missions;
-    const needle = q.toLowerCase().trim();
-    return missions.filter(m =>
-      [m.titre, m.description, m.profils?.nom]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-        .includes(needle)
-    );
-  }, [missions, q]);
+    let result = missions;
+    if (debouncedQ.trim()) {
+      const needle = debouncedQ.toLowerCase().trim();
+      result = result.filter(m =>
+        [m.titre, m.description, m.profils?.nom]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(needle)
+      );
+    }
+    if (useAI && Object.keys(aiScores).length > 0) {
+      result = [...result].sort((a, b) => (aiScores[b.id]?.score ?? 0) - (aiScores[a.id]?.score ?? 0));
+    }
+    return result;
+  }, [missions, debouncedQ, useAI, aiScores]);
 
   const postuler = async (missionId: number) => {
     if (!userId) return;
@@ -138,6 +194,45 @@ export default function RechercherPoste() {
           />
         </div>
 
+        {/* Toggle IA pour les missions */}
+        <div className="mb-6 flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => {
+              setUseAI(!useAI);
+              if (!useAI && Object.keys(aiScores).length === 0) {
+                fetchAIScores();
+              }
+            }}
+            disabled={loadingAI}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-full font-bold text-sm transition ${
+              useAI
+                ? 'bg-purple-600 text-white shadow-lg shadow-purple-200'
+                : 'bg-white text-slate-700 border-2 border-slate-200 hover:border-purple-300'
+            } ${loadingAI ? 'opacity-60 cursor-wait' : ''}`}
+          >
+            {loadingAI ? (
+              <>
+                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+                </svg>
+                Analyse IA en cours...
+              </>
+            ) : (
+              <>
+                <span className="text-lg">✨</span>
+                Classer par pertinence IA {useAI ? 'activé' : ''}
+              </>
+            )}
+          </button>
+          {useAI && !loadingAI && (
+            <span className="text-xs text-purple-600 font-bold">
+              {Object.keys(aiScores).length} mission{Object.keys(aiScores).length > 1 ? 's' : ''} analysée{Object.keys(aiScores).length > 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
+
         {filtered.length === 0 ? (
           <div className="bg-white p-12 rounded-2xl border border-dashed border-slate-200 text-center">
             <p className="text-slate-500 font-medium">
@@ -150,6 +245,7 @@ export default function RechercherPoste() {
             {filtered.map(m => {
               const deja = mesCandidatures.some(c => c.mission_id === m.id);
               const isPostulating = postulating === m.id;
+              const aiScore = aiScores[m.id];
               return (
                 <article key={m.id} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_8px_20px_rgba(0,0,0,0.02)]">
                   <div className="flex justify-between items-start mb-3 gap-3">
@@ -161,11 +257,46 @@ export default function RechercherPoste() {
                         {new Date(m.created_at).toLocaleDateString('fr-FR')}
                       </p>
                     </div>
+                    {aiScore && (
+                      <div className="flex flex-col items-end gap-1">
+                        <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full border ${
+                          aiScore.score >= 80 ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
+                          aiScore.score >= 50 ? 'bg-blue-100 text-blue-700 border-blue-200' :
+                          'bg-slate-100 text-slate-500 border-slate-200'
+                        }`}>
+                          {aiScore.score}% compatible
+                        </span>
+                        <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full bg-purple-100 text-purple-700 border border-purple-200">
+                          ✨ IA
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <p className="text-slate-600 text-sm leading-relaxed mb-4 line-clamp-3 font-medium">
                     {m.description}
                   </p>
+
+                  {aiScore && (
+                    <div className="bg-purple-50 p-3 rounded-xl border border-purple-100 mb-4">
+                      <p className="text-xs font-bold text-purple-700 uppercase tracking-widest mb-1">Analyse IA</p>
+                      <p className="text-sm text-purple-900 font-medium">{aiScore.explication}</p>
+                      {aiScore.points_forts.length > 0 && (
+                        <div className="mt-2">
+                          {aiScore.points_forts.map((pf, i) => (
+                            <p key={i} className="text-xs text-emerald-700 font-medium">✓ {pf}</p>
+                          ))}
+                        </div>
+                      )}
+                      {aiScore.points_a_verifier.length > 0 && (
+                        <div className="mt-1">
+                          {aiScore.points_a_verifier.map((pv, i) => (
+                            <p key={i} className="text-xs text-amber-600 font-medium">⚠ {pv}</p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {(m.date_debut || m.date_fin) && (
                     <div className="flex flex-wrap gap-3 mb-4 text-xs">

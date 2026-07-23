@@ -32,6 +32,9 @@ export default function GestionUtilisateurs() {
   const [filter, setFilter] = useState<'all' | Profil['role']>('all');
   const [updating, setUpdating] = useState<string | null>(null);
   const [message, setMessage] = useState({ text: '', type: '' });
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 50;
+  const [total, setTotal] = useState(0);
 
   useEffect(() => {
     const run = async () => {
@@ -47,16 +50,21 @@ export default function GestionUtilisateurs() {
       }
       setAuthorized(true);
 
-      const { data } = await supabase
+      const from = page * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
+      const { data, count } = await supabase
         .from('profils')
-        .select('id, nom, email, telephone, role, created_at')
-        .order('created_at', { ascending: false });
+        .select('id, nom, email, telephone, role, created_at', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(from, to);
 
       if (data) setUsers(data as Profil[]);
+      if (count !== null) setTotal(count);
       setLoading(false);
     };
     run();
-  }, [router]);
+  }, [router, page]);
 
   const filtered = useMemo(() => {
     let list = users;
@@ -86,6 +94,8 @@ export default function GestionUtilisateurs() {
     }
     setUpdating(null);
   };
+
+  const totalPages = Math.ceil(total / PAGE_SIZE);
 
   if (authorized === false) {
     return (
@@ -228,6 +238,29 @@ export default function GestionUtilisateurs() {
         <p className="mt-4 text-xs text-slate-400 font-medium italic">
           ⚠️ Promouvoir un utilisateur en <b>admin</b> lui donne accès à toutes les coordonnées des entreprises et secrétaires inscrites. À utiliser avec parcimonie.
         </p>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-2 mt-6">
+            <button
+              onClick={() => setPage(p => Math.max(0, p - 1))}
+              disabled={page === 0}
+              className="px-4 py-2 rounded-xl text-sm font-bold border border-slate-200 hover:bg-slate-100 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              ← Précédent
+            </button>
+            <span className="text-sm font-bold text-slate-600 px-3">
+              Page {page + 1} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1}
+              className="px-4 py-2 rounded-xl text-sm font-bold border border-slate-200 hover:bg-slate-100 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Suivant →
+            </button>
+          </div>
+        )}
       </div>
     </main>
   );

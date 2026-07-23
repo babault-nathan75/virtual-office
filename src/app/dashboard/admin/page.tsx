@@ -4,6 +4,11 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { toast } from '@/components/Toast';
+import ConfirmModal from '@/components/ConfirmModal';
+import dynamic from 'next/dynamic';
+
+const StatsCharts = dynamic(() => import('@/components/StatsCharts'), { ssr: false, loading: () => null });
 
 type ContactProfil = {
   id: string;
@@ -33,6 +38,8 @@ export default function DashboardAdmin() {
   // Ajout de nbSecretaires et nbEntreprises dans le state des statistiques
   const [stats, setStats] = useState({ enAttente: 0, conclues: 0, nbSecretaires: 0, nbEntreprises: 0 });
   const [acting, setActing] = useState<number | null>(null);
+  const [modalConfirm, setModalConfirm] = useState<{ id: number; statut: 'concluee' | 'refusee' } | null>(null);
+  const [historique, setHistorique] = useState<{ id: number; created_at: string; mission_titre: string; entreprise_nom: string; secretaire_nom: string }[]>([]);
 
   useEffect(() => {
     const run = async () => {
@@ -46,30 +53,24 @@ export default function DashboardAdmin() {
         return;
       }
 
-      // Offres en attente
-      const { data: offresRaw } = await supabase
-        .from('offres')
-        .select('id, statut, message, created_at, entreprise_id, secretaire_id, mission_id, missions(titre)')
-        .eq('statut', 'en_attente')
-        .order('created_at', { ascending: false });
+      // Requêtes en parallèle
+      const [offresRes, concluesRes, entRes, secRes] = await Promise.all([
+        supabase.from('offres')
+          .select('id, statut, message, created_at, entreprise_id, secretaire_id, mission_id, missions(titre)')
+          .eq('statut', 'en_attente')
+          .order('created_at', { ascending: false }),
+        supabase.from('offres')
+          .select('id', { count: 'exact', head: true })
+          .eq('statut', 'concluee'),
+        supabase.from('offres')
+          .select('entreprise_id', { count: 'exact', head: true })
+          .eq('statut', 'concluee'),
+        supabase.from('offres')
+          .select('secretaire_id', { count: 'exact', head: true })
+          .eq('statut', 'concluee'),
+      ]);
 
-      // Stat : nombre d'offres conclues
-      const { count: conclues } = await supabase
-        .from('offres')
-        .select('id', { count: 'exact', head: true })
-        .eq('statut', 'concluee');
-
-      // Récupération du nombre d'entreprises distinctes ayant une offre conclue
-      const { count: countEntreprises } = await supabase
-        .from('offres')
-        .select('entreprise_id', { count: 'exact', head: true })
-        .eq('statut', 'concluee');
-
-      // Récupération du nombre de secrétaires distinctes ayant une offre conclue
-      const { count: countSecretaires } = await supabase
-        .from('offres')
-        .select('secretaire_id', { count: 'exact', head: true })
-        .eq('statut', 'concluee');
+      const offresRaw = offresRes.data;
 
       if (offresRaw && offresRaw.length > 0) {
         const ids = Array.from(new Set(offresRaw.flatMap(o => [o.entreprise_id, o.secretaire_id])));
@@ -88,10 +89,32 @@ export default function DashboardAdmin() {
 
       setStats({ 
         enAttente: offresRaw?.length ?? 0, 
-        conclues: conclues ?? 0,
-        nbEntreprises: countEntreprises ?? 0,
-        nbSecretaires: countSecretaires ?? 0
+        conclues: concluesRes.count ?? 0,
+        nbEntreprises: entRes.count ?? 0,
+        nbSecretaires: secRes.count ?? 0
       });
+
+      // Historique des mises en relation conclues
+      const { data: histOffres } = await supabase
+        .from('offres')
+        .select('id, created_at, mission_id, entreprise_id, secretaire_id, missions(titre)')
+        .eq('statut', 'concluee')
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      if (histOffres && histOffres.length > 0) {
+        const allIds = Array.from(new Set(histOffres.flatMap(o => [o.entreprise_id, o.secretaire_id])));
+        const { data: histProfs } = await supabase.from('profils').select('id, nom').in('id', allIds);
+        const histMap = new Map((histProfs ?? []).map(p => [p.id, p.nom]));
+        setHistorique(histOffres.map(o => ({
+          id: o.id,
+          created_at: o.created_at,
+          mission_titre: (o.missions as any)?.titre ?? '—',
+          entreprise_nom: histMap.get(o.entreprise_id) ?? '?',
+          secretaire_nom: histMap.get(o.secretaire_id) ?? '?',
+        })));
+      }
+
       setLoading(false);
     };
     run();
@@ -101,7 +124,7 @@ export default function DashboardAdmin() {
     setActing(offreId);
     const { error } = await supabase.from('offres').update({ statut: nouveauStatut }).eq('id', offreId);
     if (error) {
-      alert(error.message);
+      toast.error(error.message);
       setActing(null);
       return;
     }
@@ -110,9 +133,8 @@ export default function DashboardAdmin() {
       ...prev,
       enAttente: prev.enAttente - 1,
       conclues: prev.conclues + (nouveauStatut === 'concluee' ? 1 : 0),
-      // Note: Pour une mise à jour ultra-précise en temps réel des comptes d'utilisateurs uniques, 
-      // un re-fetch complet serait idéal. À défaut, on maintient les anciennes valeurs ici.
     }));
+    toast.success(nouveauStatut === 'concluee' ? 'Mise en relation finalisée !' : 'Offre refusée');
     setActing(null);
   };
 
@@ -141,6 +163,12 @@ export default function DashboardAdmin() {
             <button onClick={() => window.location.reload()} className="bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-xl font-bold text-sm transition">
               Actualiser
             </button>
+            <Link href="/dashboard/admin/messages" className="bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-xl font-bold text-sm transition">
+              Messages
+            </Link>
+            <Link href="/dashboard/admin/kyc" className="bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-xl font-bold text-sm transition">
+              KYC
+            </Link>
             <Link href="/dashboard/admin/utilisateurs" className="bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-xl font-bold text-sm transition">
               Utilisateurs
             </Link>
@@ -172,6 +200,9 @@ export default function DashboardAdmin() {
             Voir le site public →
           </Link>
         </div>
+
+        {/* Stats avec graphiques */}
+        <StatsCharts />
 
         <h2 className="text-xl font-black tracking-tight text-slate-900 mb-5 flex items-center gap-2">
           🤝 Offres en attente de finalisation
@@ -254,18 +285,20 @@ export default function DashboardAdmin() {
                   )}
 
                   <div className="p-5 bg-slate-50 border-t border-slate-100 flex flex-col md:flex-row gap-3">
-                    <button
-                      onClick={() => gererOffre(o.id, 'concluee')}
-                      disabled={isActing}
-                      className="flex-1 bg-slate-900 text-white font-extrabold tracking-tight py-3.5 rounded-2xl hover:bg-emerald-600 transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isActing ? 'En cours...' : '✓ Mise en relation finalisée'}
-                    </button>
-                    <button
-                      onClick={() => gererOffre(o.id, 'refusee')}
-                      disabled={isActing}
-                      className="bg-white text-slate-500 font-bold px-6 py-3.5 rounded-2xl border border-slate-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
+                      <button
+                        onClick={() => setModalConfirm({ id: o.id, statut: 'concluee' })}
+                        disabled={isActing}
+                        aria-label="Finaliser la mise en relation"
+                        className="flex-1 bg-slate-900 text-white font-extrabold tracking-tight py-3.5 rounded-2xl hover:bg-emerald-600 transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isActing ? 'En cours...' : '✓ Mise en relation finalisée'}
+                      </button>
+                      <button
+                        onClick={() => setModalConfirm({ id: o.id, statut: 'refusee' })}
+                        disabled={isActing}
+                        aria-label="Refuser l'offre"
+                        className="bg-white text-slate-500 font-bold px-6 py-3.5 rounded-2xl border border-slate-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
                       Refuser
                     </button>
                   </div>
@@ -274,7 +307,55 @@ export default function DashboardAdmin() {
             })}
           </div>
         )}
+
+        {/* Historique des mises en relation */}
+        {historique.length > 0 && (
+          <>
+            <h2 className="text-xl font-black tracking-tight text-slate-900 mb-5 mt-10 flex items-center gap-2">
+              📋 Historique des mises en relation
+            </h2>
+            <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden mb-8">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-100">
+                      <th className="text-left px-5 py-3 font-black text-slate-500 uppercase text-[10px] tracking-widest">Date</th>
+                      <th className="text-left px-5 py-3 font-black text-slate-500 uppercase text-[10px] tracking-widest">Mission</th>
+                      <th className="text-left px-5 py-3 font-black text-slate-500 uppercase text-[10px] tracking-widest">Entreprise</th>
+                      <th className="text-left px-5 py-3 font-black text-slate-500 uppercase text-[10px] tracking-widest">Secrétaire</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historique.map(h => (
+                      <tr key={h.id} className="border-b border-slate-50 hover:bg-slate-50 transition">
+                        <td className="px-5 py-3 font-medium text-slate-600">{new Date(h.created_at).toLocaleDateString('fr-FR')}</td>
+                        <td className="px-5 py-3 font-bold text-slate-900">{h.mission_titre}</td>
+                        <td className="px-5 py-3 font-medium text-blue-600">{h.entreprise_nom}</td>
+                        <td className="px-5 py-3 font-medium text-emerald-600">{h.secretaire_nom}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
       </div>
+
+      <ConfirmModal
+        open={modalConfirm !== null}
+        title={modalConfirm?.statut === 'concluee' ? 'Finaliser la mise en relation ?' : 'Refuser cette offre ?'}
+        message={modalConfirm?.statut === 'concluee'
+          ? 'Cette action validera la mise en relation entre l\'entreprise et la secrétaire. Les coordonnées seront révélées aux deux parties.'
+          : 'Êtes-vous sûr de vouloir refuser cette offre ? Cette action est irréversible.'}
+        confirmLabel={modalConfirm?.statut === 'concluee' ? 'Oui, finaliser' : 'Refuser'}
+        danger={modalConfirm?.statut === 'refusee'}
+        onConfirm={() => {
+          if (modalConfirm) gererOffre(modalConfirm.id, modalConfirm.statut);
+          setModalConfirm(null);
+        }}
+        onCancel={() => setModalConfirm(null)}
+      />
     </div>
   );
 }

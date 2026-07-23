@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import PasswordInput from '@/components/PasswordInput';
+import PasswordStrength from '@/components/PasswordStrength';
 
 export default function Inscription() {
   const router = useRouter();
@@ -35,6 +36,24 @@ export default function Inscription() {
     setLoading(true);
     setMessage({ text: '', type: '' });
 
+    if (nom.trim().length < 2) {
+      setMessage({ text: 'Le nom doit contenir au moins 2 caractères.', type: 'error' });
+      setLoading(false);
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setMessage({ text: 'Adresse email invalide.', type: 'error' });
+      setLoading(false);
+      return;
+    }
+
+    if (password.length < 6) {
+      setMessage({ text: 'Le mot de passe doit contenir au moins 6 caractères.', type: 'error' });
+      setLoading(false);
+      return;
+    }
+
     if (password !== confirmPassword) {
       setMessage({ text: "Les mots de passe ne correspondent pas.", type: 'error' });
       setLoading(false);
@@ -57,10 +76,10 @@ export default function Inscription() {
       setMessage({ text: error.message, type: 'error' });
     } else {
       setMessage({
-        text: '🎉 Inscription réussie ! Vous pouvez maintenant vous connecter.',
+        text: '🎉 Inscription réussie ! Vous allez être redirigé vers la vérification de votre identité.',
         type: 'success',
       });
-      setTimeout(() => router.push('/connexion'), 2000);
+      setTimeout(() => router.push('/dashboard/kyc'), 2000);
     }
     setLoading(false);
   };
@@ -155,14 +174,15 @@ export default function Inscription() {
               <label className="block text-sm font-bold text-slate-700 mb-1.5">
                 {role === 'entreprise' ? "Nom de l'entreprise ou du gérant" : 'Prénom et Nom'}
               </label>
-              <input
-                type="text"
-                required
-                value={nom}
-                onChange={(e) => setNom(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder={role === 'entreprise' ? 'Ex: Tech Solutions' : 'Ex: Marie Dupont'}
-              />
+                <input
+                  type="text"
+                  required
+                  value={nom}
+                  onChange={(e) => setNom(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder={role === 'entreprise' ? 'Ex: Tech Solutions' : 'Ex: Marie Dupont'}
+                  aria-label={role === 'entreprise' ? "Nom de l'entreprise" : 'Prénom et Nom'}
+                />
             </div>
 
             {/* Téléphone */}
@@ -203,6 +223,7 @@ export default function Inscription() {
                   placeholder="••••••••"
                   autoComplete="new-password"
                 />
+                <PasswordStrength password={password} />
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1.5">Confirmer</label>

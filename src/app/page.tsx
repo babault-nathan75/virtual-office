@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import HeroCTA from '@/components/HeroCTA';
 
 export default function Home() {
@@ -9,10 +10,12 @@ export default function Home() {
       <section className="w-full relative py-36 px-4 text-center overflow-hidden flex items-center justify-center min-h-[85vh]">
         {/* Image d'arrière-plan avec traitement colorimétrique professionnel */}
         <div className="absolute inset-0 z-0">
-          <img
+          <Image
             src="/images/secretaire_background.jpg"
             alt="Secrétaire dynamique avec documents"
-            className="w-full h-full object-cover object-center scale-105 animate-[subtle-zoom_20s_ease-out_infinite]"
+            fill
+            priority
+            className="object-cover object-center scale-105 animate-[subtle-zoom_20s_ease-out_infinite]"
           />
           {/* Double dégradé pour fusionner parfaitement l'image et le texte */}
           <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/50 to-blue-950/40"></div>

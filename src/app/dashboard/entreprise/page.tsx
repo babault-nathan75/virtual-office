@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { toast } from '@/components/Toast';
+import NotificationBell from '@/components/NotificationBell';
 
 type Secretaire = { id: string; nom: string; };
 
@@ -44,6 +46,7 @@ const DISPO_LABEL: Record<string, string> = {
 export default function DashboardEntreprise() {
   const router = useRouter();
   const [nom, setNom] = useState('');
+  const [userId, setUserId] = useState('');
   const [missions, setMissions] = useState<Mission[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -59,6 +62,7 @@ export default function DashboardEntreprise() {
     const fetchDonnees = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { router.push('/connexion'); return; }
+      setUserId(session.user.id);
       
       const { data: userData } = await supabase.from('profils').select('nom').eq('id', session.user.id).single();
       if (userData) setNom(userData.nom);
@@ -82,15 +86,41 @@ export default function DashboardEntreprise() {
     fetchDonnees();
   }, [router]);
 
-  const refuserCandidature = async (candidatureId: number) => {
+  const refuserCandidature = async (missionId: number, candidatureId: number) => {
+    // Mise à jour optimiste
+    setMissions(prev => prev.map(m =>
+      m.id === missionId
+        ? { ...m, candidatures: m.candidatures.map(c => c.id === candidatureId ? { ...c, statut: 'refusee' } : c) }
+        : m
+    ));
+    setStats(prev => ({ ...prev, enAttente: Math.max(0, prev.enAttente - 1) }));
+
     const { error } = await supabase.from('candidatures').update({ statut: 'refusee' }).eq('id', candidatureId);
-    if (error) return alert(error.message);
-    window.location.reload();
+    if (error) {
+      toast.error('Erreur : ' + error.message);
+      // Rollback en cas d'erreur
+      setMissions(prev => prev.map(m =>
+        m.id === missionId
+          ? { ...m, candidatures: m.candidatures.map(c => c.id === candidatureId ? { ...c, statut: 'en_attente' } : c) }
+          : m
+      ));
+      setStats(prev => ({ ...prev, enAttente: prev.enAttente + 1 }));
+    } else {
+      toast.success('Candidature refusée');
+    }
   };
 
   const proposerOffre = async (candidatureId: number, secretaireId: string, missionId: number) => {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return alert('Vous devez être connecté.');
+    if (!session) return toast.error('Vous devez être connecté.');
+
+    // Mise à jour optimiste
+    setMissions(prev => prev.map(m =>
+      m.id === missionId
+        ? { ...m, candidatures: m.candidatures.map(c => c.id === candidatureId ? { ...c, statut: 'acceptee' } : c) }
+        : m
+    ));
+    setStats(prev => ({ ...prev, enAttente: Math.max(0, prev.enAttente - 1) }));
 
     const { error: offErr } = await supabase.from('offres').insert({
       entreprise_id: session.user.id,
@@ -101,22 +131,29 @@ export default function DashboardEntreprise() {
     });
 
     if (offErr) {
+      // Rollback
+      setMissions(prev => prev.map(m =>
+        m.id === missionId
+          ? { ...m, candidatures: m.candidatures.map(c => c.id === candidatureId ? { ...c, statut: 'en_attente' } : c) }
+          : m
+      ));
+      setStats(prev => ({ ...prev, enAttente: prev.enAttente + 1 }));
       if (offErr.code === '23505') {
-        return alert('Une offre est déjà en attente pour cette secrétaire.');
+        return toast.error('Une offre est déjà en attente pour cette secrétaire.');
       }
-      return alert('Erreur : ' + offErr.message);
+      return toast.error('Erreur : ' + offErr.message);
     }
 
-    // La candidature est marquée comme acceptée, mais la mission reste ouverte
-    // tant que l'admin n'a pas conclu l'offre (le trigger fermera la mission à ce moment-là)
     await supabase.from('candidatures').update({ statut: 'acceptee' }).eq('id', candidatureId);
-    window.location.reload();
+    toast.success('Offre proposée avec succès !');
   };
 
   const ouvrirProfil = async (secretaireId: string, secretaireNom: string) => {
     setSelectedSecretaire({ id: secretaireId, nom: secretaireNom });
     setLoadingDetails(true);
-    const { data } = await supabase.from('profils_secretaires').select('*').eq('id', secretaireId).single();
+    const { data } = await supabase.from('profils_secretaires')
+      .select('photo_url, bio, ville, disponibilite, niveau_etudes, langues, outils, soft_skills, competences, annees_experience')
+      .eq('id', secretaireId).single();
     if (data) setDetailsProfil(data);
     setLoadingDetails(false);
   };
@@ -129,13 +166,23 @@ export default function DashboardEntreprise() {
         
         {/* HEADER DYNAMIQUE */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
-          <div>
-            <h1 className="text-3xl font-extrabold text-gray-900">Espace Entreprise — {nom}</h1>
-            <p className="text-gray-500">Gérez vos missions et vos recrutements en un coup d'œil.</p>
+          <div className="flex items-center gap-4">
+            <div>
+              <h1 className="text-3xl font-extrabold text-gray-900">Espace Entreprise — {nom}</h1>
+              <p className="text-gray-500">Gérez vos missions et vos recrutements en un coup d&apos;œil.</p>
+            </div>
+            {userId && (
+              <div className="relative">
+                <NotificationBell userId={userId} role="entreprise" />
+              </div>
+            )}
           </div>
           <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
             <Link href="/dashboard/entreprise/chercher" className="bg-white border-2 border-blue-200 text-blue-700 px-6 py-3 rounded-xl font-bold hover:border-blue-600 hover:bg-blue-50 transition flex items-center justify-center gap-2">
               🔍 Trouver une secrétaire
+            </Link>
+            <Link href="/dashboard/messages" className="bg-white border-2 border-slate-200 text-slate-700 px-6 py-3 rounded-xl font-bold hover:border-blue-300 hover:bg-blue-50 transition flex items-center justify-center gap-2">
+              💬 Messages
             </Link>
             <Link href="/dashboard/entreprise/nouvelle-mission" className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-100 transition flex items-center justify-center gap-2">
               <span>+</span> Publier une mission
@@ -195,7 +242,7 @@ export default function DashboardEntreprise() {
                             <div className="flex justify-between items-start gap-3">
                               <div className="min-w-0">
                                 <p className="font-bold text-gray-800 truncate">{secretaire.nom}</p>
-                                <button onClick={() => ouvrirProfil(secretaire.id, secretaire.nom)} className="text-blue-600 text-xs font-bold hover:underline">Voir le profil</button>
+                                <button onClick={() => ouvrirProfil(secretaire.id, secretaire.nom)} aria-label={`Voir le profil de ${secretaire.nom}`} className="text-blue-600 text-xs font-bold hover:underline">Voir le profil</button>
                               </div>
                               {cand.statut !== 'en_attente' && (
                                 <span className={`text-[10px] font-black px-2 py-1 rounded-md whitespace-nowrap ${
@@ -212,12 +259,14 @@ export default function DashboardEntreprise() {
                               <div className="flex gap-2">
                                 <button
                                   onClick={() => proposerOffre(cand.id, secretaire.id, mission.id)}
+                                  aria-label={`Proposer une offre à ${secretaire.nom}`}
                                   className="flex-1 bg-blue-600 text-white text-xs font-extrabold tracking-tight px-3 py-2 rounded-lg hover:bg-blue-700 transition"
                                 >
                                   Proposer une offre
                                 </button>
                                 <button
-                                  onClick={() => refuserCandidature(cand.id)}
+                                  onClick={() => refuserCandidature(mission.id, cand.id)}
+                                  aria-label={`Refuser la candidature de ${secretaire.nom}`}
                                   className="bg-red-50 text-red-600 text-xs font-bold px-3 py-2 rounded-lg hover:bg-red-100 transition"
                                 >
                                   Refuser
