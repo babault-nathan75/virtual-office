@@ -5,6 +5,7 @@ import "./globals.css";
 import Navbar from "@/components/Navbar";
 import PWAInit from "@/components/PWAInit";
 import { ToastContainer } from "@/components/Toast";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -83,6 +84,7 @@ export default function RootLayout({
         <Navbar />
         <PWAInit />
         <ToastContainer />
+        <SpeedInsights />
         {children}
         <footer className="border-t border-slate-100 bg-white py-5 px-4 text-center text-xs text-slate-500 font-medium">
           <span>© {new Date().getFullYear()} SecrétariatPro</span>
