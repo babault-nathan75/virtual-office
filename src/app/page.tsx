@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'SecrétariatPro - Secrétaire en ligne pour entreprise',
     description: 'Trouvez la secrétaire idéale ou publiez vos missions en quelques clics. Flexible, sans engagement.',
-    url: 'https://secretariatpro.vercel.app',
+    url: 'https://secretariatpro-drab.vercel.app',
     siteName: 'SecrétariatPro',
     locale: 'fr_FR',
     type: 'website',
@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     title: 'SecrétariatPro - Secrétaire en ligne',
     description: 'Mise en relation entreprises et secrétaires qualifiées. Flexible, sécurisé, sans engagement.',
   },
-  alternates: { canonical: 'https://secretariatpro.vercel.app' },
+  alternates: { canonical: 'https://secretariatpro-drab.vercel.app' },
 };
 
 export default function Home() {

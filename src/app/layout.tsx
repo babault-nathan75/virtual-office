@@ -35,7 +35,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "SecrétariatPro - Mise en relation entreprises et secrétaires",
     description: "Plateforme de mise en relation entre entreprises et secrétaires qualifiées.",
-    url: "https://secretariatpro.vercel.app",
+    url: "https://secretariatpro-drab.vercel.app",
     siteName: "SecrétariatPro",
     locale: "fr_FR",
     type: "website",
@@ -45,7 +45,7 @@ export const metadata: Metadata = {
     title: "SecrétariatPro",
     description: "Mise en relation entre entreprises et secrétaires qualifiées.",
   },
-  metadataBase: new URL("https://secretariatpro.vercel.app"),
+  metadataBase: new URL("https://secretariatpro-drab.vercel.app"),
 };
 
 export const viewport: Viewport = {

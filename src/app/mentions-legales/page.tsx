@@ -4,7 +4,7 @@ import Link from '@/components/Link';
 export const metadata: Metadata = {
   title: 'Mentions légales — SecrétariatPro',
   description: 'Mentions légales du site SecrétariatPro.',
-  alternates: { canonical: 'https://secretariatpro.vercel.app/mentions-legales' },
+  alternates: { canonical: 'https://secretariatpro-drab.vercel.app/mentions-legales' },
 };
 
 export default function MentionsLegales() {

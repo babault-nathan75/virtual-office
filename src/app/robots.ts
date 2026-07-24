@@ -22,6 +22,6 @@ export default function robots(): MetadataRoute.Robots {
         disallow: '/',
       },
     ],
-    sitemap: 'https://secretariatpro.vercel.app/sitemap.xml',
+    sitemap: 'https://secretariatpro-drab.vercel.app/sitemap.xml',
   };
 }

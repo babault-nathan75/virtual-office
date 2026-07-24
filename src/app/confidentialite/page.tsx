@@ -4,7 +4,7 @@ import Link from '@/components/Link';
 export const metadata: Metadata = {
   title: 'Politique de confidentialité — SecrétariatPro',
   description: 'Politique de confidentialité et traitement des données personnelles sur SecrétariatPro.',
-  alternates: { canonical: 'https://secretariatpro.vercel.app/confidentialite' },
+  alternates: { canonical: 'https://secretariatpro-drab.vercel.app/confidentialite' },
 };
 
 export default function Confidentialite() {

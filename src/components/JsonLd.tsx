@@ -3,8 +3,8 @@ export function OrganizationJsonLd() {
     '@context': 'https://schema.org',
     '@type': 'Organization',
     name: 'SecrétariatPro',
-    url: 'https://secretariatpro.vercel.app',
-    logo: 'https://secretariatpro.vercel.app/logo.png',
+    url: 'https://secretariatpro-drab.vercel.app',
+    logo: 'https://secretariatpro-drab.vercel.app/logo.png',
     description: 'Plateforme de mise en relation entre entreprises et secrétaires qualifiées.',
     sameAs: [],
     contactPoint: {
@@ -31,10 +31,10 @@ export function WebSiteJsonLd() {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
     name: 'SecrétariatPro',
-    url: 'https://secretariatpro.vercel.app',
+    url: 'https://secretariatpro-drab.vercel.app',
     potentialAction: {
       '@type': 'SearchAction',
-      target: 'https://secretariatpro.vercel.app/dashboard/entreprise/chercher?q={search_term_string}',
+      target: 'https://secretariatpro-drab.vercel.app/dashboard/entreprise/chercher?q={search_term_string}',
       'query-input': 'required name=search_term_string',
     },
   };

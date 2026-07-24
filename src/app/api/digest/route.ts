@@ -57,7 +57,7 @@ function generateDigestHTML(userName: string, stats: { messages: number; unread:
       </div>
     </div>
   </div>
-  <a href="https://secretariatpro.vercel.app/dashboard/messages" style="display: block; text-align: center; background: #2563eb; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; margin: 20px 0;">Voir mes discussions</a>
+  <a href="https://secretariatpro-drab.vercel.app/dashboard/messages" style="display: block; text-align: center; background: #2563eb; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; margin: 20px 0;">Voir mes discussions</a>
   <p style="font-size: 11px; color: #94a3b8; text-align: center; margin-top: 30px;">Email automatique — SecrétariatPro</p>
 </body>
 </html>`;
