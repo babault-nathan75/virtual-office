@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import Link from '@/components/Link';
+import { Button, Card } from '@/components/ui';
 
 // ============================================================
 // Données des QCM (listes de choix)
@@ -465,14 +466,29 @@ export default function ProfilSecretaire() {
                 </div>
               </section>
 
-              <button
+              <Button
                 type="submit"
                 disabled={saving}
-                className="w-full mt-6 py-4 rounded-full text-white font-extrabold tracking-tight text-base bg-blue-600 hover:bg-blue-700 transition shadow-lg shadow-blue-200 disabled:opacity-60 disabled:cursor-not-allowed"
+                variant="primary"
+                size="lg"
+                className="w-full mt-6"
               >
                 {saving ? 'Enregistrement...' : 'Mettre à jour mon profil'}
-              </button>
+              </Button>
             </form>
+
+            <div className="mt-6 border-t border-slate-100 pt-6">
+              <Link
+                href="/dashboard/profil/2fa"
+                className="flex items-center gap-3 p-4 rounded-2xl border-2 border-slate-200 hover:border-blue-400 hover:bg-blue-50 transition-all"
+              >
+                <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-xl">🔐</div>
+                <div>
+                  <p className="font-extrabold text-slate-900 text-sm">Authentification à deux facteurs (2FA)</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Sécurisez votre compte avec Google Authenticator ou un code par email</p>
+                </div>
+              </Link>
+            </div>
           </div>
         </div>
       </div>

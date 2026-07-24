@@ -3,9 +3,10 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import Link from '@/components/Link';
 import Image from 'next/image';
 import { toast } from '@/components/Toast';
+import { Button, Card } from '@/components/ui';
 
 type FormData = {
   prenom: string;
@@ -394,13 +395,15 @@ export default function KycPage() {
             </div>
 
             {/* Bouton */}
-            <button
+            <Button
               type="submit"
               disabled={submitting}
-              className="w-full py-4 rounded-full bg-blue-600 text-white font-extrabold tracking-tight text-base hover:bg-blue-700 transition shadow-lg shadow-blue-200 disabled:opacity-60 disabled:cursor-not-allowed"
+              variant="primary"
+              size="lg"
+              className="w-full"
             >
               {submitting ? 'Envoi en cours...' : 'Soumettre ma vérification'}
-            </button>
+            </Button>
           </form>
         </div>
       </div>

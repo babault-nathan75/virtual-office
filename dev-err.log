@@ -1,0 +1,5 @@
+⚠ turbopack.root should be absolute, using: C:\Users\hp\Desktop\Projet\secretariat-en-ligne
+Warning: Custom Cache-Control headers detected for the following routes:
+  - /_next/static/(.*)
+
+Setting a custom Cache-Control header can break Next.js development behavior.

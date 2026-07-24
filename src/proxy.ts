@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -42,7 +42,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Routes publiques — pas besoin d'auth
-  const publicRoutes = ['/', '/connexion', '/inscription', '/mot-de-passe-oublie', '/reinitialisation', '/cgu', '/confidentialite', '/mentions-legales', '/profile'];
+  const publicRoutes = ['/', '/connexion', '/inscription', '/mot-de-passe-oublie', '/reinitialisation', '/cgu', '/confidentialite', '/mentions-legales', '/profile', '/confirmer-email'];
   const isPublic = publicRoutes.some(r => pathname === r) || pathname.startsWith('/api/');
 
   if (!user && !isPublic) {
@@ -63,7 +63,7 @@ export async function middleware(request: NextRequest) {
       .from('profils')
       .select('role')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
 
     const role = profil?.role;
 
@@ -85,31 +85,7 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    // KYC obligatoire pour les entreprises et secrétaires (pas admin, pas page KYC elle-même)
-    if (role !== 'admin' && !pathname.startsWith('/dashboard/kyc') && !pathname.startsWith('/dashboard/admin')) {
-      const { data: kyc } = await supabase
-        .from('kyc_verifications')
-        .select('status')
-        .eq('user_id', user.id)
-        .single();
 
-      if (!kyc || (kyc.status !== 'approved' && kyc.status !== 'pending' && kyc.status !== 'rejected')) {
-        const url = request.nextUrl.clone();
-        url.pathname = '/dashboard/kyc';
-        return NextResponse.redirect(url);
-      }
-
-      // Si KYC en attente ou rejeté, permettre seulement /dashboard, /dashboard/kyc, /profile
-      if (kyc && (kyc.status === 'pending' || kyc.status === 'rejected')) {
-        const allowedPaths = ['/dashboard', '/dashboard/kyc', '/profile', '/dashboard/secretaire/profil'];
-        const isAllowed = allowedPaths.some(p => pathname === p);
-        if (!isAllowed) {
-          const url = request.nextUrl.clone();
-          url.pathname = '/dashboard/kyc';
-          return NextResponse.redirect(url);
-        }
-      }
-    }
   }
 
   return supabaseResponse;

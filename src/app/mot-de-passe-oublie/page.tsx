@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import Link from '@/components/Link';
 import Image from 'next/image';
 
 export default function MotDePasseOublie() {
@@ -29,34 +29,13 @@ export default function MotDePasseOublie() {
     setLoading(true);
     setMessage({ text: '', type: '' });
 
-    // Vérifier si l'email existe dans la base via API route (bypass RLS)
-    try {
-      const res = await fetch('/api/check-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim() }),
-      });
-      const { exists } = await res.json();
-
-      if (!exists) {
-        setMessage({ text: 'not_found', type: 'not_found' });
-        setLoading(false);
-        return;
-      }
-    } catch {
-      // En cas d'erreur réseau, on laisse passer vers Supabase
-    }
-
     const redirectTo = `${window.location.origin}/reinitialisation`;
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo });
 
     if (error) {
       setMessage({ text: error.message, type: 'error' });
     } else {
-      setMessage({
-        text: 'sent',
-        type: 'success',
-      });
+      setMessage({ text: 'sent', type: 'success' });
       setEmail('');
     }
     setLoading(false);
@@ -116,31 +95,6 @@ export default function MotDePasseOublie() {
             </div>
           )}
 
-          {/* Email non trouvé */}
-          {message.type === 'not_found' && (
-            <div className="space-y-5">
-              <div className="p-5 bg-amber-50 border border-amber-200 rounded-2xl text-center">
-                <p className="text-4xl mb-3">🔍</p>
-                <p className="text-sm font-bold text-amber-900 mb-1">Aucun compte trouvé</p>
-                <p className="text-xs text-amber-700 font-medium">
-                  Aucun compte n&apos;est associé à cette adresse email. Vous pouvez créer un compte en quelques secondes.
-                </p>
-              </div>
-              <Link
-                href="/inscription"
-                className="block w-full text-center py-3.5 rounded-full text-white font-extrabold tracking-tight text-sm transition shadow-lg shadow-emerald-200 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500"
-              >
-                Créer un compte gratuitement
-              </Link>
-              <button
-                onClick={() => { setMessage({ text: '', type: '' }); setEmail(''); }}
-                className="block w-full text-center py-3.5 rounded-full text-slate-600 font-bold text-sm border border-slate-200 hover:bg-slate-50 transition"
-              >
-                Essayer un autre email
-              </button>
-            </div>
-          )}
-
           {/* Erreur */}
           {message.type === 'error' && (
             <div className="mb-6 p-4 rounded-xl text-sm font-medium text-center bg-red-50 text-red-700 border border-red-200">
@@ -149,7 +103,7 @@ export default function MotDePasseOublie() {
           )}
 
           {/* Formulaire */}
-          {message.type !== 'success' && message.type !== 'not_found' && (
+          {message.type !== 'success' && (
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1.5">Adresse email</label>

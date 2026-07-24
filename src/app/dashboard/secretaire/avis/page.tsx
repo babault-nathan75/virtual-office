@@ -43,7 +43,7 @@ export default function RatingPage() {
       const userId = session.user.id;
       setUserId(userId);
 
-      const { data: profil } = await supabase.from('profils').select('role').eq('id', userId).single();
+      const { data: profil } = await supabase.from('profils').select('role').eq('id', userId).maybeSingle();
       if (profil) setRole(profil.role as 'entreprise' | 'secretaire');
 
       // Fetch concluded missions where the user is involved

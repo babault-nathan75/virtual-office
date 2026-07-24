@@ -6,6 +6,7 @@ export default function PWAInit() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!('serviceWorker' in navigator)) return;
+    if (process.env.NODE_ENV !== 'production') return;
     // Enregistrement après la fin du chargement initial pour ne pas
     // compétir avec le rendu de la page
     const onLoad = () => {

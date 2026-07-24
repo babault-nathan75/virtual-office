@@ -1,0 +1,38 @@
+export const designTokens = {
+  typography: {
+    xs: 'text-[12px] leading-4',
+    sm: 'text-[14px] leading-5',
+    base: 'text-[16px] leading-6',
+    lg: 'text-[18px] leading-7',
+    xl: 'text-[20px] leading-8',
+    '2xl': 'text-[24px] leading-9',
+    '3xl': 'text-[30px] leading-[36px]',
+  },
+  spacing: {
+    '0.5': '2px',
+    '1': '4px',
+    '1.5': '6px',
+    '2': '8px',
+    '2.5': '10px',
+    '3': '12px',
+    '4': '16px',
+    '5': '20px',
+    '6': '24px',
+    '8': '32px',
+    '10': '40px',
+    '12': '48px',
+    '16': '64px',
+  },
+  radius: {
+    sm: 'rounded-lg',
+    md: 'rounded-xl',
+    lg: 'rounded-2xl',
+    full: 'rounded-full',
+  },
+  animation: {
+    fast: 'duration-150',
+    normal: 'duration-200',
+    slow: 'duration-300',
+    easing: 'ease-out',
+  },
+} as const;

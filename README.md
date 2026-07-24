@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SecrétariatPro
 
-## Getting Started
+Plateforme de mise en relation entre entreprises et secrétaires qualifiées.
 
-First, run the development server:
+## Stack technique
+
+- **Frontend** : Next.js 16, React 19, Tailwind CSS v4, TypeScript
+- **Backend** : Supabase (PostgreSQL, Auth, Storage, Realtime)
+- **IA** : Google Gemini (gemini-2.0-flash)
+- **Email** : Nodemailer (Gmail SMTP)
+- **Déploiement** : Vercel
+
+## Fonctionnalités
+
+### Utilisateurs
+- Inscription/connexion (email + Google Auth)
+- Profil complet avec photo
+- Vérification d'identité (KYC)
+- Authentification à deux facteurs (2FA)
+- Messagerie temps réel avec l'administration
+- Notifications push
+
+### Admin
+- Tableau de bord avec statistiques
+- Gestion desKYC
+- Messagerie avec tous les utilisateurs
+- Matching IA entreprise-secrétaire
+
+### Sécurité
+- Rate limiting (Upstash Redis)
+- CSP headers, XSS protection
+- Audit logs
+- Session timeout 30min
+- Input sanitization
+
+### UX/UI
+- Dark mode
+- Command palette (Cmd+K)
+- Keyboard shortcuts
+- Skeletons de chargement
+- Messages optimistic
+- Swipe actions (mobile)
+- Bottom navigation (mobile)
+- Offline support (PWA)
+
+## Installation
 
 ```bash
+npm install
+cp .env.example .env  # Configurer les variables
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Variables d'environnement
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Voir `.env.example` pour la liste complète.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Tests
 
-## Learn More
+```bash
+npm run test
+npm run test:watch
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Scripts
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `npm run dev` — Serveur de développement
+- `npm run build` — Build de production
+- `npm run start` — Démarrer le build
+- `npm run lint` — Linter le code
+- `npm run test` — Lancer les tests

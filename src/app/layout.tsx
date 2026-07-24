@@ -5,6 +5,7 @@ import "./globals.css";
 import Navbar from "@/components/Navbar";
 import PWAInit from "@/components/PWAInit";
 import { ToastContainer } from "@/components/Toast";
+import Providers from "@/components/Providers";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const geistSans = Geist({
@@ -79,22 +80,27 @@ export default function RootLayout({
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
+        {process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN && (
+          <script defer data-domain={process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN} src="https://plausible.io/js/script.js" />
+        )}
       </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased selection:bg-blue-500 selection:text-white bg-slate-50 text-slate-900`}>
-        <Navbar />
-        <PWAInit />
-        <ToastContainer />
-        <SpeedInsights />
-        {children}
-        <footer className="border-t border-slate-100 bg-white py-5 px-4 text-center text-xs text-slate-500 font-medium">
-          <span>© {new Date().getFullYear()} SecrétariatPro</span>
-          <span className="mx-2 text-slate-300">·</span>
-          <Link href="/mentions-legales" className="hover:text-blue-700 transition">Mentions légales</Link>
-          <span className="mx-2 text-slate-300">·</span>
-          <Link href="/cgu" className="hover:text-blue-700 transition">CGU</Link>
-          <span className="mx-2 text-slate-300">·</span>
-          <Link href="/confidentialite" className="hover:text-blue-700 transition">Confidentialité</Link>
-        </footer>
+      <body className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased selection:bg-blue-500 selection:text-white bg-slate-50 dark:bg-gray-900 text-slate-900 dark:text-gray-100`}>
+        <Providers>
+          <Navbar />
+          <PWAInit />
+          <ToastContainer />
+          <SpeedInsights />
+          {children}
+          <footer className="border-t border-slate-100 dark:border-gray-800 bg-white dark:bg-gray-800 py-5 px-4 text-center text-xs text-slate-500 dark:text-gray-400 font-medium">
+            <span>© {new Date().getFullYear()} SecrétariatPro</span>
+            <span className="mx-2 text-slate-300 dark:text-gray-600">·</span>
+            <Link href="/mentions-legales" className="hover:text-blue-700 dark:hover:text-blue-400 transition">Mentions légales</Link>
+            <span className="mx-2 text-slate-300 dark:text-gray-600">·</span>
+            <Link href="/cgu" className="hover:text-blue-700 dark:hover:text-blue-400 transition">CGU</Link>
+            <span className="mx-2 text-slate-300 dark:text-gray-600">·</span>
+            <Link href="/confidentialite" className="hover:text-blue-700 dark:hover:text-blue-400 transition">Confidentialité</Link>
+          </footer>
+        </Providers>
       </body>
     </html>
   );

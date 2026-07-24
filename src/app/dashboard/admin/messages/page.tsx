@@ -3,13 +3,12 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import Link from '@/components/Link';
 import ChatWindow from '@/components/ChatWindow';
 
 export default function AdminMessagesPage() {
   const router = useRouter();
   const [userId, setUserId] = useState('');
-  const [role, setRole] = useState<'admin'>('admin');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -21,7 +20,7 @@ export default function AdminMessagesPage() {
         .from('profils')
         .select('role')
         .eq('id', session.user.id)
-        .single();
+        .maybeSingle();
 
       if (!profil || profil.role !== 'admin') {
         router.push('/dashboard');
@@ -35,7 +34,11 @@ export default function AdminMessagesPage() {
   }, [router]);
 
   if (loading) {
-    return <div className="p-12 text-center text-slate-500 font-medium">Chargement...</div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
   }
 
   return (
@@ -49,13 +52,13 @@ export default function AdminMessagesPage() {
         </Link>
 
         <header className="mb-6">
-          <h1 className="text-3xl font-black tracking-tight text-slate-900">Messages</h1>
+          <h1 className="text-3xl font-black tracking-tight text-slate-900">Discussions</h1>
           <p className="text-slate-500 font-medium mt-1">
             Conversations avec les entreprises et les secrétaires.
           </p>
         </header>
 
-        <ChatWindow currentUserId={userId} currentRole={role} />
+        <ChatWindow currentUserId={userId} currentRole="admin" />
       </div>
     </div>
   );

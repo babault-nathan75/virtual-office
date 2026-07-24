@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import Link from '@/components/Link';
 import { toast } from '@/components/Toast';
 import NotificationBell from '@/components/NotificationBell';
 
@@ -64,7 +64,7 @@ export default function DashboardEntreprise() {
       if (!session) { router.push('/connexion'); return; }
       setUserId(session.user.id);
       
-      const { data: userData } = await supabase.from('profils').select('nom').eq('id', session.user.id).single();
+      const { data: userData } = await supabase.from('profils').select('nom').eq('id', session.user.id).maybeSingle();
       if (userData) setNom(userData.nom);
 
       const { data: missionsData } = await supabase

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import Link from '@/components/Link';
 import { useDebounce } from '@/hooks/useDebounce';
 
 // ============================================================
@@ -239,18 +239,29 @@ export default function ChercherSecretaire() {
 
       const approvedIds = (approvedKycs ?? []).map(k => k.user_id);
 
+      // IDs des secrétaires avec 2FA activé
+      const { data: twoFactorUsers } = await supabase
+        .from('two_factor_auth')
+        .select('user_id')
+        .eq('enabled', true);
+
+      const tfaIds = (twoFactorUsers ?? []).map(t => t.user_id);
+
+      // Intersection : KYC approved ET 2FA enabled
+      const visibleIds = approvedIds.filter(id => tfaIds.includes(id));
+
       // Profils des secrétaires (nom seulement — surtout pas email/tel)
       const { data: profils } = await supabase
         .from('profils')
         .select('id, nom')
         .eq('role', 'secretaire')
-        .in('id', approvedIds.length > 0 ? approvedIds : ['__none__']);
+        .in('id', visibleIds.length > 0 ? visibleIds : ['__none__']);
 
       // Données métier
       const { data: metiers } = await supabase
         .from('profils_secretaires')
         .select('id, photo_url, bio, ville, disponibilite, niveau_etudes, langues, outils, soft_skills, competences, annees_experience')
-        .in('id', approvedIds.length > 0 ? approvedIds : ['__none__']);
+        .in('id', visibleIds.length > 0 ? visibleIds : ['__none__']);
 
       // Merge
       const merged: Secretaire[] = (profils ?? []).map(p => {

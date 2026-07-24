@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import Link from '@/components/Link';
 import PasswordInput from '@/components/PasswordInput';
 
 type Profil = {
@@ -56,7 +56,7 @@ export default function Profile() {
         .from('profils')
         .select('id, nom, email, telephone, role, created_at')
         .eq('id', session.user.id)
-        .single();
+        .maybeSingle();
 
       if (p) {
         setProfil(p as Profil);

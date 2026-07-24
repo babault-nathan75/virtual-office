@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import Link from '@/components/Link';
 
 type Profil = {
   id: string;
@@ -42,7 +42,7 @@ export default function GestionUtilisateurs() {
       if (!session) { router.push('/connexion'); return; }
       setMe(session.user.id);
 
-      const { data: my } = await supabase.from('profils').select('role').eq('id', session.user.id).single();
+      const { data: my } = await supabase.from('profils').select('role').eq('id', session.user.id).maybeSingle();
       if (my?.role !== 'admin') {
         setAuthorized(false);
         setLoading(false);

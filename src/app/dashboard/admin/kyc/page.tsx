@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import Link from '@/components/Link';
 import { toast } from '@/components/Toast';
 import ConfirmModal from '@/components/ConfirmModal';
 
@@ -42,7 +42,7 @@ export default function AdminKycPage() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { router.push('/connexion'); return; }
 
-      const { data: profil } = await supabase.from('profils').select('role').eq('id', session.user.id).single();
+      const { data: profil } = await supabase.from('profils').select('role').eq('id', session.user.id).maybeSingle();
       if (!profil || profil.role !== 'admin') {
         router.push('/dashboard');
         return;

@@ -1,78 +1,103 @@
 const CACHE_NAME = 'secretariatpro-v1';
+const STATIC_CACHE = 'secretariatpro-static-v1';
+const DYNAMIC_CACHE = 'secretariatpro-dynamic-v1';
+
 const STATIC_ASSETS = [
   '/',
-  '/connexion',
-  '/inscription',
-  '/cgu',
-  '/confidentialite',
-  '/mentions-legales',
+  '/offline',
   '/icon.png',
+  '/manifest.webmanifest',
 ];
 
-// Install — precache les assets statiques
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
+    caches.open(STATIC_CACHE).then((cache) => cache.addAll(STATIC_ASSETS))
   );
   self.skipWaiting();
 });
 
-// Activate — nettoyage des anciens caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    (async () => {
-      const keys = await caches.keys();
-      await Promise.all(
-        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
-      );
-      await self.clients.claim();
-    })()
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((key) => key !== STATIC_CACHE && key !== DYNAMIC_CACHE).map((key) => caches.delete(key)))
+    )
   );
+  self.clients.claim();
 });
 
-// Fetch — strategie stale-while-revalidate pour les assets,
-// network-first pour les pages dynamiques
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  const url = new URL(request.url);
-
-  // Ignorer les requêtes non-GET
   if (request.method !== 'GET') return;
 
-  // Ignorer les appels API et Supabase
-  if (url.pathname.startsWith('/api/') || url.hostname.includes('supabase')) return;
-
-  // Assets statiques (CSS, JS, images) — stale-while-revalidate
-  if (
-    url.pathname.startsWith('/_next/static/') ||
-    url.pathname.endsWith('.css') ||
-    url.pathname.endsWith('.js') ||
-    url.pathname.match(/\.(png|jpg|jpeg|gif|webp|svg|ico)$/)
-  ) {
+  // Network-first for API calls
+  if (request.url.includes('/api/')) {
     event.respondWith(
-      caches.open(CACHE_NAME).then(async (cache) => {
-        const cached = await cache.match(request);
-        const fetchPromise = fetch(request).then((response) => {
-          if (response.ok) cache.put(request, response.clone());
+      fetch(request)
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(DYNAMIC_CACHE).then((cache) => cache.put(request, clone));
           return response;
-        }).catch(() => cached);
+        })
+        .catch(() => caches.match(request))
+    );
+    return;
+  }
 
-        return cached || fetchPromise;
+  // Cache-first for static assets
+  if (request.url.includes('/_next/static/') || request.url.includes('/images/') || request.url.endsWith('.css') || request.url.endsWith('.js')) {
+    event.respondWith(
+      caches.match(request).then((cached) => {
+        if (cached) return cached;
+        return fetch(request).then((response) => {
+          const clone = response.clone();
+          caches.open(STATIC_CACHE).then((cache) => cache.put(request, clone));
+          return response;
+        });
       })
     );
     return;
   }
 
-  // Pages — network-first avec fallback cache
+  // Stale-while-revalidate for pages
   event.respondWith(
-    fetch(request)
-      .then((response) => {
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-        }
+    caches.match(request).then((cached) => {
+      const networkFetch = fetch(request).then((response) => {
+        const clone = response.clone();
+        caches.open(DYNAMIC_CACHE).then((cache) => cache.put(request, clone));
         return response;
-      })
-      .catch(() => caches.match(request))
+      }).catch(() => {
+        if (request.mode === 'navigate') {
+          return caches.match('/offline');
+        }
+        return cached;
+      });
+
+      return cached || networkFetch;
+    })
+  );
+});
+
+// Push notifications
+self.addEventListener('push', (event) => {
+  const data = event.data?.json() || { title: 'SecrétariatPro', body: 'Nouvelle notification' };
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: '/icon.png',
+      badge: '/icon.png',
+      data: data.url || '/dashboard',
+      actions: [
+        { action: 'open', title: 'Ouvrir' },
+        { action: 'dismiss', title: 'Fermer' },
+      ],
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  if (event.action === 'dismiss') return;
+  event.waitUntil(
+    self.clients.openWindow(event.notification.data || '/dashboard')
   );
 });
