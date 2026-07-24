@@ -7,6 +7,7 @@ import PWAInit from "@/components/PWAInit";
 import { ToastContainer } from "@/components/Toast";
 import Providers from "@/components/Providers";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import { OrganizationJsonLd, WebSiteJsonLd } from "@/components/JsonLd";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -59,27 +60,11 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const jsonLd = {
-    '@context': 'https://schema.org',
-    '@type': 'Organization',
-    name: 'SecrétariatPro',
-    url: 'https://secretariatpro.vercel.app',
-    description: 'Plateforme de mise en relation entre entreprises et secrétaires qualifiées.',
-    sameAs: [],
-    contactPoint: {
-      '@type': 'ContactPoint',
-      contactType: 'customer service',
-      availableLanguage: 'French',
-    },
-  };
-
   return (
     <html lang="fr">
       <head>
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-        />
+        <OrganizationJsonLd />
+        <WebSiteJsonLd />
         {process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN && (
           <script defer data-domain={process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN} src="https://plausible.io/js/script.js" />
         )}

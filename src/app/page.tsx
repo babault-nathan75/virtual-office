@@ -1,10 +1,33 @@
 import Link from '@/components/Link';
 import Image from 'next/image';
 import HeroCTA from '@/components/HeroCTA';
+import { FAQJsonLd } from '@/components/JsonLd';
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: 'SecrétariatPro - Secrétaire en ligne pour entreprise',
+  description: 'Plateforme de mise en relation entre entreprises et secrétaires qualifiées. Trouvez une secrétaire freelance, publiez vos missions et collaborsez en toute sécurité.',
+  openGraph: {
+    title: 'SecrétariatPro - Secrétaire en ligne pour entreprise',
+    description: 'Trouvez la secrétaire idéale ou publiez vos missions en quelques clics. Flexible, sans engagement.',
+    url: 'https://secretariatpro.vercel.app',
+    siteName: 'SecrétariatPro',
+    locale: 'fr_FR',
+    type: 'website',
+    images: [{ url: '/og-home.png', width: 1200, height: 630, alt: 'SecrétariatPro' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'SecrétariatPro - Secrétaire en ligne',
+    description: 'Mise en relation entreprises et secrétaires qualifiées. Flexible, sécurisé, sans engagement.',
+  },
+  alternates: { canonical: 'https://secretariatpro.vercel.app' },
+};
 
 export default function Home() {
   return (
     <main className="min-h-screen bg-slate-50 flex flex-col items-center font-sans antialiased selection:bg-blue-500 selection:text-white">
+      <FAQJsonLd />
 
       {/* 🌟 SECTION HERO – VISUEL IMPACTANT & TYPOGRAPHIE EMBLÉMATIQUE */}
       <section className="w-full relative py-36 px-4 text-center overflow-hidden flex items-center justify-center min-h-[85vh]">

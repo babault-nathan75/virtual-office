@@ -4,6 +4,7 @@ import Link from '@/components/Link';
 export const metadata: Metadata = {
   title: 'Conditions générales d\'utilisation — SecrétariatPro',
   description: 'Conditions générales d\'utilisation de la plateforme SecrétariatPro.',
+  alternates: { canonical: 'https://secretariatpro.vercel.app/cgu' },
 };
 
 export default function CGU() {
