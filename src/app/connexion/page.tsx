@@ -45,7 +45,16 @@ function ConnexionContent() {
     });
 
     if (authError) {
-      setErrorMsg(authError.message);
+      const msg = authError.message;
+      if (msg === 'Invalid login credentials') {
+        setErrorMsg('Email ou mot de passe incorrect');
+      } else if (msg.includes('Email not confirmed')) {
+        setErrorMsg('Votre email n\'a pas encore été confirmé. Vérifiez votre boîte de réception.');
+      } else if (msg.includes('Too many requests')) {
+        setErrorMsg('Trop de tentatives. Réessayez dans quelques minutes.');
+      } else {
+        setErrorMsg(msg);
+      }
       setLoading(false);
       return;
     }

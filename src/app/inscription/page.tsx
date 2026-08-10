@@ -49,7 +49,16 @@ export default function Inscription() {
     });
 
     if (error) {
-      setMessage({ text: error.message, type: 'error' });
+      const msg = error.message;
+      if (msg === 'User already registered') {
+        setMessage({ text: 'Un compte existe déjà avec cet email.', type: 'error' });
+      } else if (msg.includes('Password should be at least')) {
+        setMessage({ text: 'Le mot de passe doit contenir au moins 6 caractères.', type: 'error' });
+      } else if (msg.includes('Unable to validate email address')) {
+        setMessage({ text: 'Adresse email invalide.', type: 'error' });
+      } else {
+        setMessage({ text: msg, type: 'error' });
+      }
       setLoading(false);
       return;
     }
