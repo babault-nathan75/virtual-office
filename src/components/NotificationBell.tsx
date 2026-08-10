@@ -33,12 +33,12 @@ export default function NotificationBell({ userId, role }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const prevCountRef = useRef(0);
   const channelsRef = useRef<ReturnType<typeof supabase.channel>[]>([]);
-  const subIdRef = useRef(0);
 
   useEffect(() => {
     if (!userId) return;
 
     let isMounted = true;
+    const subId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
     const fetchInitial = async () => {
       try {
@@ -286,7 +286,6 @@ export default function NotificationBell({ userId, role }: Props) {
 
     // Supabase Realtime subscriptions — all channels pushed to ref BEFORE subscribe
     const channels: ReturnType<typeof supabase.channel>[] = [];
-    const subId = ++subIdRef.current;
 
     // Messages
     const messagesChannel = supabase
