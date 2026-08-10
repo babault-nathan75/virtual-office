@@ -26,8 +26,6 @@ type Profile = {
   role: UserRole;
   email?: string | null;
   telephone?: string | null;
-  avatar_url?: string | null;
-  last_seen?: string | null;
 };
 
 type Message = {
@@ -52,7 +50,7 @@ const MESSAGE_SELECT =
   'id, sender_id, receiver_id, content, read, read_at, closed, closed_by, closed_at, created_at';
 
 const PROFILE_SELECT =
-  'id, nom, role, email, telephone, avatar_url, last_seen';
+  'id, nom, role, email, telephone';
 
 function isUserRole(value: unknown): value is UserRole {
   return value === 'entreprise' || value === 'secretaire' || value === 'admin';
@@ -209,7 +207,7 @@ export default function MessagesPage() {
   }, [contactSearch, contacts]);
 
   const activePresence = activeContact
-    ? getPresenceInfo(activeContact.last_seen, now)
+    ? getPresenceInfo(undefined, now)
     : null;
 
   const dashboardHref = currentRole === 'admin' ? '/admin' : '/dashboard';
@@ -267,29 +265,6 @@ export default function MessagesPage() {
     };
   }, [router]);
 
-  // Heartbeat de présence du compte courant.
-  useEffect(() => {
-    if (!currentUserId) return;
-
-    const updatePresence = async () => {
-      const { error } = await supabase
-        .from('profils')
-        .update({ last_seen: new Date().toISOString() })
-        .eq('id', currentUserId);
-
-      if (error) {
-        console.warn('Mise à jour de présence impossible :', error.message);
-      }
-    };
-
-    void updatePresence();
-    const presenceInterval = window.setInterval(() => {
-      void updatePresence();
-    }, 30_000);
-
-    return () => window.clearInterval(presenceInterval);
-  }, [currentUserId]);
-
   // Horloge locale pour actualiser les libellés de présence.
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
@@ -331,16 +306,19 @@ export default function MessagesPage() {
             .from('profils')
             .select(PROFILE_SELECT)
             .eq('role', 'admin')
-            .order('nom', { ascending: true })
-            .limit(1)
-            .maybeSingle();
+            .order('nom', { ascending: true });
 
           if (error) throw error;
           if (cancelled) return;
 
-          const admin = data as Profile | null;
-          setContacts(admin ? [admin] : []);
-          setActiveContact(admin);
+          const admins = (data ?? []) as Profile[];
+          setContacts(admins);
+          setActiveContact((previous) => {
+            if (previous && admins.some((a) => a.id === previous.id)) {
+              return admins.find((a) => a.id === previous.id) ?? previous;
+            }
+            return admins[0] ?? null;
+          });
         }
       } catch (error) {
         console.error('Chargement des contacts impossible :', error);
@@ -769,7 +747,7 @@ export default function MessagesPage() {
                 ) : (
                   <div className="space-y-1">
                     {filteredContacts.map((contact) => {
-                      const status = getPresenceInfo(contact.last_seen, now);
+                      const status = getPresenceInfo(undefined, now);
                       const selected = activeContact?.id === contact.id;
 
                       return (
@@ -1199,7 +1177,7 @@ function Avatar({
     <div className="relative shrink-0">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={profile.avatar_url || '/avatar-placeholder.png'}
+        src={'/avatar-placeholder.png'}
         alt={`Avatar de ${profile.nom}`}
         className={`${sizeClass} rounded-full border border-slate-200 bg-slate-100 object-cover shadow-sm`}
       />

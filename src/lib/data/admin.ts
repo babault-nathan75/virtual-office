@@ -29,7 +29,7 @@ const getAdminDashboardDataCached = unstable_cache(
       { data: kycPending },
       { data: newMissions }
     ] = await Promise.all([
-      supabase.from('profils').select('nom, avatar_url').eq('id', userId).maybeSingle(),
+      supabase.from('profils').select('nom').eq('id', userId).maybeSingle(),
       supabase.from('messages').select('id', { count: 'exact', head: true }),
       supabase.from('messages').select('id', { count: 'exact', head: true }).gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
       supabase.from('messages').select('sender_id, created_at').order('created_at', { ascending: false }).limit(100),

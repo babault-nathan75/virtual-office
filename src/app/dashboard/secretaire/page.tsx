@@ -29,7 +29,7 @@ export default async function DashboardSecretairePage() {
     <SecretaireDashboardClient
       userId={user.id}
       userName={data.profil?.nom || 'Secrétaire'}
-      userAvatar={data.profil?.avatar_url || data.profilSecretaire?.photo_url}
+      userAvatar={data.profilSecretaire?.photo_url}
       completion={completion}
       missions={data.missions as any}
       candidatures={data.candidatures as any}

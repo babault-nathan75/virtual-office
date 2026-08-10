@@ -10,7 +10,7 @@ function getSupabase() {
 }
 
 export type AdminDashboardData = {
-  profil: { nom: string; avatar_url?: string } | null;
+  profil: { nom: string } | null;
   totalMessages: number;
   messagesLast7d: number;
   avgResponseTime: string;

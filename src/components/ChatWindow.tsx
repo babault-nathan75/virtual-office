@@ -1,11 +1,21 @@
-'use client';
+"use client";
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { supabase } from '@/lib/supabaseClient';
-import { toast } from '@/components/Toast';
-import { SkeletonChat } from '@/components/Skeleton';
-import { isFeatureEnabled } from '@/lib/features';
-import { useSwipeActions } from '@/hooks/useSwipeActions';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type ReactNode,
+} from "react";
+import { supabase } from "@/lib/supabaseClient";
+import { toast } from "@/components/Toast";
+import { SkeletonChat } from "@/components/Skeleton";
+import { isFeatureEnabled } from "@/lib/features";
+import { useSwipeActions } from "@/hooks/useSwipeActions";
+import lamejs from "lamejs";
 
 type Message = {
   id: number;
@@ -17,19 +27,8 @@ type Message = {
   closed: boolean;
   closed_by: string | null;
   closed_at: string | null;
-  deleted: boolean;
-  deleted_by: string | null;
-  deleted_at: string | null;
   ephemeral: boolean;
   expires_at: string | null;
-  file_url: string | null;
-  file_type: string | null;
-  file_name: string | null;
-  pinned: boolean;
-  pinned_by: string | null;
-  pinned_at: string | null;
-  reply_to: number | null;
-  reactions: Record<string, string[]> | null;
   created_at: string;
 };
 
@@ -50,146 +49,618 @@ type Profile = {
   role: string;
   email?: string;
   telephone?: string;
-  avatar_url?: string;
-  last_seen?: string;
 };
 
-type SearchHit = { id: number; sender_id: string; content: string; created_at: string };
+type SearchHit = {
+  id: number;
+  sender_id: string;
+  content: string;
+  created_at: string;
+};
+
+type ContactOption = {
+  id: string;
+  nom: string;
+  role: string;
+  email?: string;
+};
+
+type MessageAttachment = {
+  url: string;
+  type: string;
+  name: string;
+  legacy: boolean;
+};
 
 type Props = {
   currentUserId: string;
-  currentRole: 'entreprise' | 'secretaire' | 'admin';
+  currentRole: "entreprise" | "secretaire" | "admin";
+  /** @deprecated Conservé pour compatibilité ; les administrateurs sont désormais chargés depuis profils. */
   adminId?: string;
 };
 
+type ConfirmAction =
+  | { kind: "closeConversation"; otherId: string };
+
 const PAGE_SIZE = 30;
 const EPHEMERAL_OPTIONS = [
-  { label: '5 min', ms: 5 * 60 * 1000 },
-  { label: '1 h', ms: 60 * 60 * 1000 },
-  { label: '24 h', ms: 24 * 60 * 60 * 1000 },
+  { label: "5 min", ms: 5 * 60 * 1000 },
+  { label: "1 h", ms: 60 * 60 * 1000 },
+  { label: "24 h", ms: 24 * 60 * 60 * 1000 },
 ];
 
-export default function ChatWindow({ currentUserId, currentRole, adminId }: Props) {
+const MAX_MESSAGE_LENGTH = 2000;
+const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
+const CHAT_FILES_BUCKET = "chat-files";
+const RECORDING_MIME_TYPES = [
+  "audio/mp4;codecs=mp4a.40.2",
+  "audio/mp4",
+  "audio/webm;codecs=opus",
+  "audio/ogg;codecs=opus",
+  "audio/webm",
+  "audio/ogg",
+] as const;
+
+function roleLabel(role: string) {
+  if (role === "admin") return "Administration";
+  if (role === "entreprise") return "Entreprise";
+  return "Secrétaire";
+}
+
+function roleDotClass(role: string) {
+  if (role === "admin") return "bg-amber-500";
+  if (role === "entreprise") return "bg-emerald-500";
+  return "bg-blue-500";
+}
+
+function rolePillClass(role: string) {
+  if (role === "admin") return "bg-amber-50 text-amber-700 ring-amber-200";
+  if (role === "entreprise")
+    return "bg-emerald-50 text-emerald-700 ring-emerald-200";
+  return "bg-blue-50 text-blue-700 ring-blue-200";
+}
+
+function getInitials(name: string) {
+  return (
+    name
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part.charAt(0))
+      .join("") || "?"
+  );
+}
+
+function safeHttpUrl(value?: string | null) {
+  if (!value) return null;
+
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" || parsed.protocol === "http:"
+      ? parsed.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function fileNameFromUrl(url: string) {
+  try {
+    const pathname = new URL(url).pathname;
+    const lastSegment = pathname.split("/").filter(Boolean).pop();
+    return lastSegment ? decodeURIComponent(lastSegment) : "Fichier";
+  } catch {
+    return "Fichier";
+  }
+}
+
+function inferFileType(url: string, fallback?: string | null) {
+  if (fallback) return fallback;
+
+  const extension = fileNameFromUrl(url).split(".").pop()?.toLowerCase();
+  const mimeTypes: Record<string, string> = {
+    webm: "audio/webm",
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    ogg: "audio/ogg",
+    m4a: "audio/mp4",
+    mp4: "video/mp4",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+    avif: "image/avif",
+    pdf: "application/pdf",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    xls: "application/vnd.ms-excel",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    csv: "text/csv",
+    txt: "text/plain",
+  };
+
+  return extension
+    ? mimeTypes[extension] || "application/octet-stream"
+    : "application/octet-stream";
+}
+
+function preferredRecordingMimeType() {
+  if (typeof MediaRecorder === "undefined") return "";
+
+  return (
+    RECORDING_MIME_TYPES.find((mimeType) =>
+      MediaRecorder.isTypeSupported(mimeType),
+    ) || ""
+  );
+}
+
+function audioFileExtension(mimeType: string) {
+  const normalizedType = mimeType.toLowerCase();
+  if (normalizedType.includes("mp4") || normalizedType.includes("aac")) {
+    return "m4a";
+  }
+  if (normalizedType.includes("ogg")) return "ogg";
+  if (normalizedType.includes("mpeg")) return "mp3";
+  if (normalizedType.includes("wav")) return "wav";
+  return "webm";
+}
+
+async function convertBlobToMp3(blob: Blob): Promise<Blob> {
+  const ctx = new OfflineAudioContext(1, 1, 44100);
+  const arrayBuffer = await blob.arrayBuffer();
+  const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+
+  const channels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const length = audioBuffer.length;
+  const mp3Encoder = new lamejs.Mp3Encoder(channels, sampleRate, 192);
+
+  const samplesPerChunk = 1152;
+  const mp3Chunks: Int8Array[] = [];
+
+  for (let i = 0; i < length; i += samplesPerChunk) {
+    const end = Math.min(i + samplesPerChunk, length);
+
+    if (channels === 2) {
+      const left = new Int16Array(end - i);
+      const right = new Int16Array(end - i);
+      const leftFloat = audioBuffer.getChannelData(0);
+      const rightFloat = audioBuffer.getChannelData(1);
+      for (let j = 0; j < end - i; j++) {
+        left[j] = Math.max(-32768, Math.min(32767, leftFloat[i + j] * 32768));
+        right[j] = Math.max(-32768, Math.min(32767, rightFloat[i + j] * 32768));
+      }
+      const encoded = mp3Encoder.encodeBuffer(left, right);
+      if (encoded.length > 0) mp3Chunks.push(encoded);
+    } else {
+      const mono = new Int16Array(end - i);
+      const monoFloat = audioBuffer.getChannelData(0);
+      for (let j = 0; j < end - i; j++) {
+        mono[j] = Math.max(-32768, Math.min(32767, monoFloat[i + j] * 32768));
+      }
+      const encoded = mp3Encoder.encodeBuffer(mono);
+      if (encoded.length > 0) mp3Chunks.push(encoded);
+    }
+  }
+
+  const tail = mp3Encoder.flush();
+  if (tail.length > 0) mp3Chunks.push(tail);
+
+  const combined = new Uint8Array(mp3Chunks.reduce((sum, c) => sum + c.length, 0));
+  let offset = 0;
+  for (const chunk of mp3Chunks) {
+    combined.set(new Uint8Array(chunk.buffer), offset);
+    offset += chunk.length;
+  }
+
+  return new Blob([combined], { type: "audio/mpeg" });
+}
+
+function chatFilePathFromUrl(url: string) {
+  try {
+    const pathname = new URL(url).pathname;
+    const marker = `/${CHAT_FILES_BUCKET}/`;
+    const storagePrefix = "/storage/v1/object/";
+    const prefixIndex = pathname.indexOf(storagePrefix);
+    const bucketIndex = pathname.indexOf(marker, prefixIndex);
+
+    if (prefixIndex === -1 || bucketIndex === -1) return null;
+
+    const encodedPath = pathname.slice(bucketIndex + marker.length);
+    return encodedPath ? decodeURIComponent(encodedPath) : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseLegacyAttachment(content: string): MessageAttachment | null {
+  const match = content.trim().match(/^(.*?)\s+[—–-]\s+(https?:\/\/\S+)\s*$/i);
+
+  if (!match) return null;
+
+  const url = safeHttpUrl(match[2]);
+  if (!url) return null;
+
+  const label = match[1].trim().replace(/^📎\s*/, "");
+  const inferredType = inferFileType(url);
+  const isVoice =
+    inferredType.startsWith("audio/") || /message\s+vocal/i.test(label);
+
+  return {
+    url,
+    type:
+      isVoice && !inferredType.startsWith("audio/")
+        ? "audio/webm"
+        : inferredType,
+    name: isVoice ? "Message vocal" : label || fileNameFromUrl(url),
+    legacy: true,
+  };
+}
+
+function resolveMessageAttachment(
+  message: { content: string },
+): MessageAttachment | null {
+  return parseLegacyAttachment(message.content);
+}
+
+function visibleMessageText(
+  message: { content: string },
+  attachment = resolveMessageAttachment(message),
+) {
+  const content = message.content.trim();
+  if (!attachment) return content;
+  if (parseLegacyAttachment(content)) return "";
+
+  const isDefaultVoiceLabel = /^🎤?\s*message\s+vocal$/i.test(content);
+  const isDefaultFileLabel =
+    content === attachment.name;
+
+  return isDefaultVoiceLabel || isDefaultFileLabel ? "" : content;
+}
+
+function messagePreview(message: { content: string }) {
+  const attachment = resolveMessageAttachment(message);
+  if (!attachment) return message.content;
+  if (attachment.type.startsWith("audio/")) return "🎤 Message vocal";
+  if (attachment.type.startsWith("image/")) return `🖼️ ${attachment.name}`;
+  return `📎 ${attachment.name}`;
+}
+
+function isAttachmentSchemaError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+
+  const candidate = error as { code?: string; message?: string };
+  const message = candidate.message?.toLowerCase() || "";
+  return (
+    candidate.code === "PGRST204" ||
+    candidate.code === "42703" ||
+    (message.includes("schema cache") && message.includes("file_")) ||
+    (message.includes("column") && /file_(url|type|name)/.test(message))
+  );
+}
+
+function formatConversationDate(value: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const now = new Date();
+  const isToday =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+
+  if (isToday) {
+    return date.toLocaleTimeString("fr-FR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const isYesterday =
+    date.getFullYear() === yesterday.getFullYear() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getDate() === yesterday.getDate();
+
+  if (isYesterday) return "Hier";
+
+  return date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+}
+
+function isSameDay(first: string, second: string) {
+  const a = new Date(first);
+  const b = new Date(second);
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function formatDayLabel(value: string) {
+  const date = new Date(value);
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+
+  if (isSameDay(value, now.toISOString())) return "Aujourd'hui";
+  if (isSameDay(value, yesterday.toISOString())) return "Hier";
+
+  return date.toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+  });
+}
+
+export default function ChatWindow({ currentUserId, currentRole }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [newMessage, setNewMessage] = useState('');
+  const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [downloadingAttachmentUrl, setDownloadingAttachmentUrl] = useState<
+    string | null
+  >(null);
+  const [searchingUsers, setSearchingUsers] = useState(false);
+  const [searchingMessages, setSearchingMessages] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [showNewConv, setShowNewConv] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState<{ id: string; nom: string; role: string }[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [conversationSearch, setConversationSearch] = useState("");
+  const [searchResults, setSearchResults] = useState<ContactOption[]>([]);
   const [showClosed, setShowClosed] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showConversationMenu, setShowConversationMenu] = useState(false);
   const [activeProfile, setActiveProfile] = useState<Profile | null>(null);
-  const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
+  const [typingUsers, setTypingUsers] = useState<Map<string, string>>(
+    new Map(),
+  );
   const [isTyping, setIsTyping] = useState(false);
-  const [msgSearch, setMsgSearch] = useState('');
+  const [msgSearch, setMsgSearch] = useState("");
   const [dragOver, setDragOver] = useState(false);
-  const [mentionQuery, setMentionQuery] = useState('');
   const [showMentions, setShowMentions] = useState(false);
-  const [mentionUsers, setMentionUsers] = useState<{ id: string; nom: string; role: string }[]>([]);
+  const [mentionUsers, setMentionUsers] = useState<
+    { id: string; nom: string; role: string }[]
+  >([]);
   const [msgSearchResults, setMsgSearchResults] = useState<SearchHit[]>([]);
   const [showMsgSearch, setShowMsgSearch] = useState(false);
-  const [olderCount, setOlderCount] = useState(0);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<
+    number | null
+  >(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [ephemeralMode, setEphemeralMode] = useState<number | null>(null);
-  const [dark, setDark] = useState(false);
-  const [showEmoji, setShowEmoji] = useState<number | false>(false);
+  const [activeMessageActions, setActiveMessageActions] = useState<
+    number | null
+  >(null);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [editingMsg, setEditingMsg] = useState<Message | null>(null);
-  const [editContent, setEditContent] = useState('');
+  const [editContent, setEditContent] = useState("");
   const [recording, setRecording] = useState(false);
-  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
-  const [audioChunks, setAudioChunksState] = useState<Blob[]>([]);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(
+    null,
+  );
+  const [confirmingAction, setConfirmingAction] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(
+    null,
+  );
   const audioChunksRef = useRef<Blob[]>([]);
-  const setAudioChunks = (chunks: Blob[]) => { audioChunksRef.current = chunks; setAudioChunksState(chunks); };
-  const [currentUserName, setCurrentUserName] = useState('Utilisateur');
+  const cancelRecordingRef = useRef(false);
+  const recordingMimeTypeRef = useRef("audio/webm;codecs=opus");
+  const setAudioChunks = (chunks: Blob[]) => {
+    audioChunksRef.current = chunks;
+  };
+  const [currentUserName, setCurrentUserName] = useState("Utilisateur");
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(
+    null,
+  );
+  const userSearchRequestRef = useRef(0);
+  const messageSearchRequestRef = useRef(0);
+  const draftsRef = useRef<Map<string, string>>(new Map());
+  const attachmentColumnsSupportedRef = useRef<boolean | null>(null);
 
-  const { offset: swipeOffset, onTouchStart: swipeStart, onTouchMove: swipeMove, onTouchEnd: swipeEnd } = useSwipeActions({
-    onSwipeLeft: () => { if (selectedConv) closeConversation(selectedConv.otherId); },
-    onSwipeRight: () => { if (selectedConv) reopenConversation(selectedConv.otherId); },
+  const {
+    offset: swipeOffset,
+    onTouchStart: swipeStart,
+    onTouchMove: swipeMove,
+    onTouchEnd: swipeEnd,
+  } = useSwipeActions({
+    onSwipeLeft: () => {
+      if (recording) return;
+      if (selectedConv && !selectedConv.closed) {
+        setConfirmAction({
+          kind: "closeConversation",
+          otherId: selectedConv.otherId,
+        });
+      }
+    },
+    onSwipeRight: () => {
+      if (recording) return;
+      if (selectedConv?.closed) void reopenConversation(selectedConv.otherId);
+    },
   });
 
   const scrollToBottom = useCallback((smooth = true) => {
-    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant' });
+    messagesEndRef.current?.scrollIntoView({
+      behavior: smooth ? "smooth" : "auto",
+    });
   }, []);
 
-  useEffect(() => {
-    setDark(document.documentElement.classList.contains('dark'));
-  }, []);
+  const selectedConversationId = selectedConv?.otherId ?? null;
+  const canContactRole = useCallback(
+    (role: string) => currentRole === "admin" || role === "admin",
+    [currentRole],
+  );
 
   useEffect(() => {
     if (!currentUserId) return;
-    supabase.from('profils').select('nom').eq('id', currentUserId).maybeSingle()
-      .then(({ data }) => { if (data?.nom) setCurrentUserName(data.nom); });
+    supabase
+      .from("profils")
+      .select("nom")
+      .eq("id", currentUserId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.nom) setCurrentUserName(data.nom);
+      });
   }, [currentUserId]);
 
-  const getStatusInfo = (lastSeen?: string) => {
-    if (!lastSeen) return { text: 'Hors ligne', online: false, color: 'bg-slate-300 dark:bg-slate-600' };
-    const diffMinutes = Math.floor((new Date().getTime() - new Date(lastSeen).getTime()) / 60000);
-    if (diffMinutes < 3) return { text: 'En ligne', online: true, color: 'bg-emerald-500 animate-pulse' };
-    if (diffMinutes < 60) return { text: `Actif il y a ${diffMinutes} min`, online: false, color: 'bg-amber-400' };
-    if (diffMinutes < 1440) return { text: `Actif il y a ${Math.floor(diffMinutes / 60)}h`, online: false, color: 'bg-slate-300' };
-    return { text: 'Hors ligne', online: false, color: 'bg-slate-300' };
-  };
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+
+      if (confirmAction && !confirmingAction) {
+        setConfirmAction(null);
+        return;
+      }
+
+      if (showProfile) {
+        setShowProfile(false);
+        return;
+      }
+
+      setShowConversationMenu(false);
+      setActiveMessageActions(null);
+      setShowMentions(false);
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [confirmAction, confirmingAction, showProfile]);
 
   const fetchConversations = useCallback(async () => {
-    const { data: allMessages, error } = await supabase
-      .from('messages')
-      .select('id, sender_id, receiver_id, content, read, closed, closed_by, deleted, created_at')
-      .or(`sender_id.eq.${currentUserId},receiver_id.eq.${currentUserId}`)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('[ChatWindow] fetchConversations error:', error);
+    if (!currentUserId) {
+      setConversations([]);
       return;
     }
 
-    if (!allMessages) return;
+    const baseColumns =
+      "id, sender_id, receiver_id, content, read, closed, closed_by, created_at, ephemeral, expires_at";
+    const loadConversationMessages = (columns: string) =>
+      supabase
+        .from("messages")
+        .select(columns)
+        .or(`sender_id.eq.${currentUserId},receiver_id.eq.${currentUserId}`)
+        .order("created_at", { ascending: false });
 
-    const convMap = new Map<string, { lastMessage: string; lastDate: string; unread: number; closed: boolean; closedBy: string | null }>();
-    for (const m of allMessages) {
-      if (m.deleted) continue;
-      const otherId = m.sender_id === currentUserId ? m.receiver_id : m.sender_id;
+    const response = await loadConversationMessages(baseColumns);
+
+    if (response.error) {
+      console.error("[ChatWindow] fetchConversations error:", response.error);
+      throw response.error;
+    }
+
+    const allMessages = response.data as unknown as { id: number; sender_id: string; receiver_id: string; content: string; read: boolean; closed: boolean; closed_by: string | null; created_at: string; ephemeral: boolean | null; expires_at: string | null }[] | null;
+
+    const convMap = new Map<
+      string,
+      {
+        lastMessage: string;
+        lastDate: string;
+        unread: number;
+        closed: boolean;
+        closedBy: string | null;
+      }
+    >();
+
+    for (const message of allMessages ?? []) {
+      const isExpired =
+        message.ephemeral &&
+        message.expires_at &&
+        new Date(message.expires_at) < new Date();
+      if (isExpired) continue;
+
+      const otherId =
+        message.sender_id === currentUserId
+          ? message.receiver_id
+          : message.sender_id;
       const existing = convMap.get(otherId);
-      const unread = m.receiver_id === currentUserId && !m.read ? 1 : 0;
-      if (!existing || new Date(m.created_at) > new Date(existing.lastDate)) {
+      const unread =
+        message.receiver_id === currentUserId && !message.read ? 1 : 0;
+
+      if (!existing) {
         convMap.set(otherId, {
-          lastMessage: m.content,
-          lastDate: m.created_at,
-          unread: existing ? existing.unread + unread : unread,
-          closed: m.closed,
-          closedBy: m.closed_by,
+          lastMessage: messagePreview(message),
+          lastDate: message.created_at,
+          unread,
+          closed: message.closed,
+          closedBy: message.closed_by,
         });
-      } else if (unread > 0 && existing) {
-        convMap.set(otherId, { ...existing, unread: existing.unread + unread });
+      } else if (unread > 0) {
+        convMap.set(otherId, {
+          ...existing,
+          unread: existing.unread + unread,
+        });
       }
     }
 
     const otherIds = Array.from(convMap.keys());
+
     if (otherIds.length === 0) {
       setConversations([]);
       setSelectedConv(null);
       return;
     }
 
-    const { data: profils } = await supabase.from('profils').select('id, nom, role').in('id', otherIds);
-    const profilMap = new Map((profils ?? []).map(p => [p.id, { nom: p.nom, role: p.role }]));
+    const { data: profils, error: profilsError } = await supabase
+      .from("profils")
+      .select("id, nom, role")
+      .in("id", otherIds);
 
-    const convs: Conversation[] = otherIds.map(id => ({
-      otherId: id,
-      otherNom: profilMap.get(id)?.nom ?? 'Utilisateur',
-      otherRole: profilMap.get(id)?.role ?? 'secretaire',
-      ...convMap.get(id)!,
-    })).sort((a, b) => new Date(b.lastDate).getTime() - new Date(a.lastDate).getTime());
+    if (profilsError) {
+      console.error("[ChatWindow] profils error:", profilsError);
+      throw profilsError;
+    }
+
+    const profilMap = new Map<
+      string,
+      {
+        nom: string;
+        role: string;
+      }
+    >(
+      (profils ?? []).map((profile) => [
+        profile.id,
+        {
+          nom: profile.nom,
+          role: profile.role,
+        },
+      ]),
+    );
+
+    const convs: Conversation[] = otherIds
+      .map((id) => ({
+        otherId: id,
+        otherNom: profilMap.get(id)?.nom ?? "Utilisateur",
+        otherRole: profilMap.get(id)?.role ?? "secretaire",
+        ...convMap.get(id)!,
+      }))
+      .sort(
+        (a, b) =>
+          new Date(b.lastDate).getTime() - new Date(a.lastDate).getTime(),
+      );
 
     setConversations(convs);
+    setSelectedConv((previous) => {
+      if (!previous) return previous;
+      return (
+        convs.find((conv) => conv.otherId === previous.otherId) ?? previous
+      );
+    });
   }, [currentUserId]);
 
   useEffect(() => {
@@ -199,174 +670,360 @@ export default function ChatWindow({ currentUserId, currentRole, adminId }: Prop
 
     const loadConversations = async () => {
       setLoading(true);
+      setLoadError(false);
       try {
         await fetchConversations();
       } catch (err) {
-        console.error('[ChatWindow] loadConversations error:', err);
+        console.error("[ChatWindow] loadConversations error:", err);
+        if (!cancelled) setLoadError(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
 
     loadConversations();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [currentUserId, fetchConversations]);
 
-  // Realtime conv list
   useEffect(() => {
     if (!currentUserId) return;
     const channel = supabase
       .channel(`conv-list:${currentUserId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-        const m = payload.new as Message;
-        if (m.sender_id === currentUserId || m.receiver_id === currentUserId) fetchConversations();
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (payload) => {
-        const m = payload.new as Message;
-        if (m.sender_id === currentUserId || m.receiver_id === currentUserId) fetchConversations();
-      })
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages" },
+        (payload) => {
+          const m = payload.new as Message;
+          if (m.sender_id === currentUserId || m.receiver_id === currentUserId)
+            fetchConversations();
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "messages" },
+        (payload) => {
+          const m = payload.new as Message;
+          if (m.sender_id === currentUserId || m.receiver_id === currentUserId)
+            fetchConversations();
+        },
+      )
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [currentUserId, fetchConversations]);
 
-  // Open conversation
   useEffect(() => {
-    if (!currentUserId || !selectedConv) return;
+    if (!currentUserId) return;
 
-    const openConversation = async () => {
-      const { data: msgs } = await supabase
-        .from('messages')
-        .select('*')
-        .or(`and(sender_id.eq.${currentUserId},receiver_id.eq.${selectedConv.otherId}),and(sender_id.eq.${selectedConv.otherId},receiver_id.eq.${currentUserId})`)
-        .order('created_at', { ascending: true })
-        .limit(PAGE_SIZE);
+    const profileChannel = supabase
+      .channel(`chat-profiles:${currentUserId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "profils" },
+        (payload) => {
+          const updated = payload.new as Profile;
 
-      if (msgs) {
-        setMessages(msgs);
-        setOlderCount(0);
-        setTimeout(() => scrollToBottom(false), 50);
-      }
+          setConversations((previous) =>
+            previous.map((conv) =>
+              conv.otherId === updated.id
+                ? {
+                    ...conv,
+                    otherNom: updated.nom ?? conv.otherNom,
+                    otherRole: updated.role ?? conv.otherRole,
+                  }
+                : conv,
+            ),
+          );
 
-      await supabase
-        .from('messages')
-        .update({ read: true, read_at: new Date().toISOString() })
-        .eq('receiver_id', currentUserId)
-        .eq('sender_id', selectedConv.otherId)
-        .eq('read', false);
-
-      setConversations(prev => prev.map(c =>
-        c.otherId === selectedConv.otherId ? { ...c, unread: 0 } : c
-      ));
-    };
-
-    openConversation();
-
-    // Typing channel
-    const typingChannel = supabase
-      .channel(`typing:${selectedConv.otherId}`)
-      .on('broadcast', { event: 'typing' }, (payload) => {
-        const data = payload.payload as { userId: string; name: string; typing: boolean };
-        if (data.userId !== currentUserId) {
-          setTypingUsers(prev => {
-            const next = new Map(prev);
-            if (data.typing) next.set(data.userId, data.name);
-            else next.delete(data.userId);
-            return next;
-          });
-        }
-      })
-      .subscribe();
-
-    // Messages realtime
-    const msgChannel = supabase
-      .channel(`chat:${currentUserId}-${selectedConv.otherId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-        const newMsg = payload.new as Message;
-        if (
-          (newMsg.sender_id === currentUserId && newMsg.receiver_id === selectedConv.otherId) ||
-          (newMsg.sender_id === selectedConv.otherId && newMsg.receiver_id === currentUserId)
-        ) {
-          setMessages(prev => [...prev, newMsg]);
-          setTimeout(scrollToBottom, 100);
-
-          if (newMsg.sender_id !== currentUserId) {
-            if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-              new Notification('SecrétariatPro', {
-                body: newMsg.content.slice(0, 100),
-                icon: '/icon-192.png',
-              });
-            }
-          }
-        }
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (payload) => {
-        const updated = payload.new as Message;
-        setMessages(prev => prev.map(m => m.id === updated.id ? { ...m, ...updated } : m));
-      })
+          setSelectedConv((previous) =>
+            previous?.otherId === updated.id
+              ? {
+                  ...previous,
+                  otherNom: updated.nom ?? previous.otherNom,
+                  otherRole: updated.role ?? previous.otherRole,
+                }
+              : previous,
+          );
+        },
+      )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(msgChannel);
-      supabase.removeChannel(typingChannel);
+      void supabase.removeChannel(profileChannel);
+    };
+  }, [currentUserId]);
+
+  useEffect(() => {
+    if (!currentUserId || !selectedConversationId) {
+      setMessages([]);
+      setLoadingMessages(false);
+      setHasMoreMessages(false);
+      return;
+    }
+
+    let cancelled = false;
+    setMessages([]);
+    setLoadingMessages(true);
+    setHasMoreMessages(false);
+
+    const belongsToConversation = (message: Message) =>
+      (message.sender_id === currentUserId &&
+        message.receiver_id === selectedConversationId) ||
+      (message.sender_id === selectedConversationId &&
+        message.receiver_id === currentUserId);
+
+    const openConversation = async () => {
+      const { data: msgs, error: messagesError } = await supabase
+        .from("messages")
+        .select("*")
+        .or(
+          `and(sender_id.eq.${currentUserId},receiver_id.eq.${selectedConversationId}),and(sender_id.eq.${selectedConversationId},receiver_id.eq.${currentUserId})`,
+        )
+        .order("created_at", { ascending: false })
+        .limit(PAGE_SIZE);
+
+      if (messagesError) {
+        console.error("[ChatWindow] openConversation error:", messagesError);
+        toast.error("Impossible de charger cette conversation.");
+        if (!cancelled) {
+          setMessages([]);
+          setLoadingMessages(false);
+        }
+        return;
+      }
+
+      if (!cancelled) {
+        setMessages((msgs ?? []).reverse() as Message[]);
+        setHasMoreMessages((msgs?.length ?? 0) === PAGE_SIZE);
+        setLoadingMessages(false);
+        window.setTimeout(() => scrollToBottom(false), 50);
+      }
+
+      const { error: readError } = await supabase
+        .from("messages")
+        .update({ read: true, read_at: new Date().toISOString() })
+        .eq("receiver_id", currentUserId)
+        .eq("sender_id", selectedConversationId)
+        .eq("read", false);
+
+      if (readError) {
+        console.warn("[ChatWindow] read status error:", readError.message);
+      }
+
+      if (!cancelled) {
+        setConversations((previous) =>
+          previous.map((conv) =>
+            conv.otherId === selectedConversationId
+              ? { ...conv, unread: 0 }
+              : conv,
+          ),
+        );
+      }
+    };
+
+    void openConversation();
+
+    const typingKey = [currentUserId, selectedConversationId].sort().join(":");
+    const typingChannel = supabase
+      .channel(`typing:${typingKey}`)
+      .on("broadcast", { event: "typing" }, (payload) => {
+        const data = payload.payload as {
+          userId: string;
+          name: string;
+          typing: boolean;
+        };
+
+        if (data.userId === currentUserId) return;
+
+        setTypingUsers((previous) => {
+          const next = new Map(previous);
+          if (data.typing) next.set(data.userId, data.name);
+          else next.delete(data.userId);
+          return next;
+        });
+      })
+      .subscribe();
+
+    typingChannelRef.current = typingChannel;
+
+    const msgChannel = supabase
+      .channel(`chat:${typingKey}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages" },
+        (payload) => {
+          const inserted = payload.new as Message;
+          if (!belongsToConversation(inserted)) return;
+
+          setMessages((previous) => {
+            if (previous.some((message) => message.id === inserted.id)) {
+              return previous;
+            }
+            return [...previous, inserted];
+          });
+
+          window.setTimeout(scrollToBottom, 100);
+
+          if (inserted.sender_id !== currentUserId) {
+            void supabase
+              .from("messages")
+              .update({ read: true, read_at: new Date().toISOString() })
+              .eq("id", inserted.id);
+
+            setConversations((previous) =>
+              previous.map((conv) =>
+                conv.otherId === selectedConversationId
+                  ? { ...conv, unread: 0 }
+                  : conv,
+              ),
+            );
+
+            if (
+              typeof Notification !== "undefined" &&
+              Notification.permission === "granted" &&
+              document.visibilityState !== "visible"
+            ) {
+              new Notification("Secrétariat Pro", {
+                body: inserted.content.slice(0, 100),
+                icon: "/icon-192.png",
+              });
+            }
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "messages" },
+        (payload) => {
+          const updated = payload.new as Message;
+          if (!belongsToConversation(updated)) return;
+
+          setMessages((previous) =>
+            previous.map((message) =>
+              message.id === updated.id ? { ...message, ...updated } : message,
+            ),
+          );
+        },
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      typingChannelRef.current = null;
+      void supabase.removeChannel(msgChannel);
+      void supabase.removeChannel(typingChannel);
       setTypingUsers(new Map());
     };
-  }, [currentUserId, selectedConv, scrollToBottom]);
+  }, [currentUserId, selectedConversationId, scrollToBottom]);
 
-  // Load older messages
   const loadOlder = async () => {
-    if (!selectedConv || messages.length === 0) return;
+    if (
+      !selectedConv ||
+      messages.length === 0 ||
+      loadingOlder ||
+      !hasMoreMessages
+    )
+      return;
+
+    const container = messagesContainerRef.current;
+    const previousScrollHeight = container?.scrollHeight ?? 0;
     setLoadingOlder(true);
     const oldest = messages[0];
-    const { data } = await supabase
-      .from('messages')
-      .select('*')
-      .or(`and(sender_id.eq.${currentUserId},receiver_id.eq.${selectedConv.otherId}),and(sender_id.eq.${selectedConv.otherId},receiver_id.eq.${currentUserId})`)
-      .lt('created_at', oldest.created_at)
-      .order('created_at', { ascending: false })
-      .limit(PAGE_SIZE);
+    try {
+      const { data, error } = await supabase
+        .from("messages")
+        .select("*")
+        .or(
+          `and(sender_id.eq.${currentUserId},receiver_id.eq.${selectedConv.otherId}),and(sender_id.eq.${selectedConv.otherId},receiver_id.eq.${currentUserId})`,
+        )
+        .lt("created_at", oldest.created_at)
+        .order("created_at", { ascending: false })
+        .limit(PAGE_SIZE);
 
-    if (data && data.length > 0) {
-      setMessages(prev => [...data.reverse(), ...prev]);
-      setOlderCount(prev => prev + data.length);
+      if (error) throw error;
+
+      const olderMessages = (data ?? []).reverse() as Message[];
+      setHasMoreMessages(olderMessages.length === PAGE_SIZE);
+
+      if (olderMessages.length > 0) {
+        setMessages((previous) => [...olderMessages, ...previous]);
+        window.requestAnimationFrame(() => {
+          if (!container) return;
+          container.scrollTop = container.scrollHeight - previousScrollHeight;
+        });
+      }
+    } catch (error) {
+      console.error("[ChatWindow] loadOlder error:", error);
+      toast.error("Les anciens messages n'ont pas pu être chargés.");
+    } finally {
+      setLoadingOlder(false);
     }
-    setLoadingOlder(false);
   };
 
-  // Typing indicator
   const handleTyping = () => {
-    if (!selectedConv) return;
+    if (!selectedConv || !typingChannelRef.current) return;
+
     if (!isTyping) {
       setIsTyping(true);
-      supabase.channel(`typing:${currentUserId}`).send({
-        type: 'broadcast',
-        event: 'typing',
-        payload: { userId: currentUserId, name: currentUserName, typing: true },
+      void typingChannelRef.current.send({
+        type: "broadcast",
+        event: "typing",
+        payload: {
+          userId: currentUserId,
+          name: currentUserName,
+          typing: true,
+        },
       });
     }
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
     typingTimeoutRef.current = setTimeout(() => {
       setIsTyping(false);
-      supabase.channel(`typing:${currentUserId}`).send({
-        type: 'broadcast',
-        event: 'typing',
-        payload: { userId: currentUserId, name: currentUserName, typing: false },
+      if (!typingChannelRef.current) return;
+
+      void typingChannelRef.current.send({
+        type: "broadcast",
+        event: "typing",
+        payload: {
+          userId: currentUserId,
+          name: currentUserName,
+          typing: false,
+        },
       });
-    }, 3000);
+    }, 1800);
   };
 
-  // Send message
   const sendMessage = async () => {
-    if (!newMessage.trim() || !selectedConv) return;
-    setSending(true);
     const contentToSend = newMessage.trim();
+    if (!contentToSend || !selectedConv || sending || selectedConv.closed)
+      return;
+    if (!canContactRole(selectedConv.otherRole)) {
+      toast.error("Vous pouvez uniquement contacter un administrateur.");
+      return;
+    }
+
+    setSending(true);
     const replyToId = replyingTo?.id || null;
-    setNewMessage('');
+    const currentEphemeralMode = ephemeralMode;
+
+    setNewMessage("");
+    draftsRef.current.delete(selectedConv.otherId);
     setEphemeralMode(null);
     setReplyingTo(null);
+    window.requestAnimationFrame(() => {
+      if (!inputRef.current) return;
+      inputRef.current.style.height = "auto";
+      inputRef.current.focus();
+    });
 
-    // Optimistic update
     const optimisticMsg: Message = {
-      id: Date.now(),
+      id: -Date.now(),
       sender_id: currentUserId,
       receiver_id: selectedConv.otherId,
       content: contentToSend,
@@ -375,22 +1032,14 @@ export default function ChatWindow({ currentUserId, currentRole, adminId }: Prop
       closed: false,
       closed_by: null,
       closed_at: null,
-      deleted: false,
-      deleted_by: null,
-      deleted_at: null,
-      ephemeral: ephemeralMode !== null,
-      expires_at: ephemeralMode ? new Date(Date.now() + ephemeralMode).toISOString() : null,
-      file_url: null,
-      file_type: null,
-      file_name: null,
-      pinned: false,
-      pinned_by: null,
-      pinned_at: null,
-      reply_to: replyToId,
-      reactions: null,
+      ephemeral: currentEphemeralMode !== null,
+      expires_at: currentEphemeralMode
+        ? new Date(Date.now() + currentEphemeralMode).toISOString()
+        : null,
       created_at: new Date().toISOString(),
     };
-    setMessages(prev => [...prev, optimisticMsg]);
+
+    setMessages((previous) => [...previous, optimisticMsg]);
     scrollToBottom();
 
     const insertData: Record<string, unknown> = {
@@ -398,188 +1047,557 @@ export default function ChatWindow({ currentUserId, currentRole, adminId }: Prop
       receiver_id: selectedConv.otherId,
       content: contentToSend,
       read: false,
-      reply_to: replyToId,
     };
 
-    if (ephemeralMode !== null) {
+    if (currentEphemeralMode !== null) {
       insertData.ephemeral = true;
-      insertData.expires_at = new Date(Date.now() + ephemeralMode).toISOString();
+      insertData.expires_at = new Date(
+        Date.now() + currentEphemeralMode,
+      ).toISOString();
     }
 
-    const { error } = await supabase.from('messages').insert(insertData);
+    try {
+      const { data, error } = await supabase
+        .from("messages")
+        .insert(insertData)
+        .select("*")
+        .single();
 
-    if (error) {
-      toast.error('Erreur : ' + error.message);
-      setMessages(prev => prev.filter(m => m.id !== optimisticMsg.id));
-      setNewMessage(contentToSend);
-    } else {
-      setTypingUsers(prev => {
-        const next = new Map(prev);
-        next.delete(currentUserId);
-        return next;
+      if (error) throw error;
+
+      const persisted = data as Message;
+      setMessages((previous) => {
+        const withoutDuplicates = previous.filter(
+          (message) =>
+            message.id !== optimisticMsg.id && message.id !== persisted.id,
+        );
+
+        return [...withoutDuplicates, persisted].sort(
+          (a, b) =>
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        );
       });
+
+      void fetchConversations();
+    } catch (error) {
+      console.error("[ChatWindow] sendMessage error:", error);
+      toast.error("Le message n'a pas pu être envoyé.");
+      setMessages((previous) =>
+        previous.filter((message) => message.id !== optimisticMsg.id),
+      );
+      setNewMessage(contentToSend);
+      window.requestAnimationFrame(() => {
+        if (!inputRef.current) return;
+        inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`;
+        inputRef.current.focus();
+      });
+    } finally {
+      setSending(false);
+      inputRef.current?.focus();
     }
-    setSending(false);
-    inputRef.current?.focus();
   };
 
-  // Upload file
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedConv) return;
+  const insertAttachmentMessage = async ({
+    receiverId,
+    content,
+    fileUrl,
+  }: {
+    receiverId: string;
+    content: string;
+    fileUrl: string;
+  }) => {
+    const { data, error } = await supabase
+      .from("messages")
+      .insert({
+        sender_id: currentUserId,
+        receiver_id: receiverId,
+        content: `${content} — ${fileUrl}`,
+        read: false,
+      })
+      .select("id, sender_id, receiver_id, content, read, read_at, closed, closed_by, closed_at, created_at")
+      .single();
 
-    const ext = file.name.split('.').pop();
-    const path = `${currentUserId}/${Date.now()}.${ext}`;
+    if (error || !data) {
+      throw error ?? new Error("Message non enregistré");
+    }
 
-    const { data, error } = await supabase.storage
-      .from('chat-files')
-      .upload(path, file, { contentType: file.type });
+    return data as Message;
+  };
 
-    if (error) {
-      toast.error('Erreur upload : ' + error.message);
+  const uploadFile = async (file: File) => {
+    if (!selectedConv || selectedConv.closed || uploadingFile) return;
+    if (!canContactRole(selectedConv.otherRole)) {
+      toast.error("Vous pouvez uniquement contacter un administrateur.");
       return;
     }
 
-    const { data: urlData } = supabase.storage.from('chat-files').getPublicUrl(data.path);
+    if (file.size > MAX_UPLOAD_SIZE) {
+      toast.error("Le fichier dépasse la limite de 10 Mo.");
+      return;
+    }
 
-    await supabase.from('messages').insert({
-      sender_id: currentUserId,
-      receiver_id: selectedConv.otherId,
-      content: file.name,
-      read: false,
-      file_url: urlData.publicUrl,
-      file_type: file.type,
-      file_name: file.name,
-    });
+    setUploadingFile(true);
+    const extension = file.name.includes(".")
+      ? file.name.split(".").pop()?.toLowerCase()
+      : "bin";
+    const uniqueSuffix = Math.random().toString(36).slice(2, 10);
+    const path = `${currentUserId}/${Date.now()}-${uniqueSuffix}.${extension || "bin"}`;
+    let storedPath: string | null = null;
 
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
+    try {
+      const { data, error: uploadError } = await supabase.storage
+        .from(CHAT_FILES_BUCKET)
+        .upload(path, file, {
+          contentType: file.type || "application/octet-stream",
+        });
 
-  // Soft delete
-  const deleteMessage = async (msgId: number) => {
-    const { error } = await supabase
-      .from('messages')
-      .update({ deleted: true, deleted_by: currentUserId, deleted_at: new Date().toISOString() })
-      .eq('id', msgId);
+      if (uploadError) throw uploadError;
+      storedPath = data.path;
 
-    if (error) {
-      toast.error('Erreur lors de la suppression.');
-    } else {
-      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, deleted: true, deleted_by: currentUserId } : m));
+      const { data: urlData } = supabase.storage
+        .from(CHAT_FILES_BUCKET)
+        .getPublicUrl(data.path);
+
+      const messageData = await insertAttachmentMessage({
+        receiverId: selectedConv.otherId,
+        content: file.name,
+        fileUrl: urlData.publicUrl,
+      });
+
+      setMessages((previous) =>
+        previous.some((message) => message.id === messageData.id)
+          ? previous
+          : [...previous, messageData],
+      );
+
+      storedPath = null;
+      scrollToBottom();
+      void fetchConversations();
+      toast.success("Fichier envoyé.");
+    } catch (error) {
+      console.error("[ChatWindow] uploadFile error:", error);
+      if (storedPath) {
+        void supabase.storage.from(CHAT_FILES_BUCKET).remove([storedPath]);
+      }
+      toast.error("Le fichier n'a pas pu être envoyé.");
+    } finally {
+      setUploadingFile(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
-  // Search users
+  const handleFileUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) void uploadFile(file);
+  };
+
+  const downloadAttachment = async (attachment: MessageAttachment) => {
+    if (downloadingAttachmentUrl) return;
+
+    const safeUrl = safeHttpUrl(attachment.url);
+    if (!safeUrl) {
+      toast.error("Le lien de ce fichier n'est pas valide.");
+      return;
+    }
+
+    setDownloadingAttachmentUrl(safeUrl);
+
+    try {
+      let fileBlob: Blob | null = null;
+      const storagePath = chatFilePathFromUrl(safeUrl);
+
+      if (storagePath) {
+        const { data, error } = await supabase.storage
+          .from(CHAT_FILES_BUCKET)
+          .download(storagePath);
+        if (error) throw error;
+        fileBlob = data;
+      } else {
+        const response = await fetch(safeUrl);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        fileBlob = await response.blob();
+      }
+
+      if (!fileBlob || fileBlob.size === 0) {
+        throw new Error("Fichier vide");
+      }
+
+      const objectUrl = URL.createObjectURL(fileBlob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = attachment.name || fileNameFromUrl(safeUrl);
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      toast.success("Fichier enregistré.");
+    } catch (error) {
+      console.error("[ChatWindow] downloadAttachment error:", error);
+      toast.error("Le fichier n'a pas pu être téléchargé.");
+    } finally {
+      setDownloadingAttachmentUrl(null);
+    }
+  };
+
   const searchUsers = async (term: string) => {
     setSearchTerm(term);
-    if (term.length < 2) { setSearchResults([]); return; }
-    const { data } = await supabase.from('profils').select('id, nom, role').neq('id', currentUserId).ilike('nom', `%${term}%`).limit(8);
-    setSearchResults((data ?? []).map(p => ({ id: p.id, nom: p.nom, role: p.role })));
+    const normalizedTerm = term.trim();
+    const requestId = ++userSearchRequestRef.current;
+    setSearchingUsers(true);
+
+    try {
+      let profilesQuery = supabase
+        .from("profils")
+        .select("id, nom, role, email")
+        .neq("id", currentUserId)
+        .in(
+          "role",
+          currentRole === "admin"
+            ? ["admin", "entreprise", "secretaire"]
+            : ["admin"],
+        );
+
+      if (normalizedTerm) {
+        profilesQuery = profilesQuery.ilike("nom", `%${normalizedTerm}%`);
+      }
+
+      const { data, error } = await profilesQuery
+        .order("nom", { ascending: true })
+        .limit(20);
+
+      if (error) throw error;
+      if (requestId !== userSearchRequestRef.current) return;
+
+      setSearchResults(
+        (data ?? []).map((profile) => ({
+          id: profile.id,
+          nom: profile.nom,
+          role: profile.role,
+          email: profile.email ?? undefined,
+        })),
+      );
+    } catch (error) {
+      console.error("[ChatWindow] searchUsers error:", error);
+      if (requestId === userSearchRequestRef.current) setSearchResults([]);
+    } finally {
+      if (requestId === userSearchRequestRef.current) setSearchingUsers(false);
+    }
   };
 
-  const startNewConversation = (user: { id: string; nom: string; role: string }) => {
-    const conv: Conversation = { otherId: user.id, otherNom: user.nom, otherRole: user.role, lastMessage: '', lastDate: '', unread: 0, closed: false, closedBy: null };
-    setConversations(prev => { if (prev.some(c => c.otherId === user.id)) return prev; return [conv, ...prev]; });
-    setSelectedConv(conv);
-    setShowNewConv(false);
-    setSearchTerm('');
+  const openNewConversationPicker = () => {
+    setShowNewConv(true);
+    setSearchTerm("");
     setSearchResults([]);
+    void searchUsers("");
   };
 
-  // Close / reopen
+  const closeNewConversationPicker = () => {
+    userSearchRequestRef.current += 1;
+    setShowNewConv(false);
+    setSearchTerm("");
+    setSearchResults([]);
+    setSearchingUsers(false);
+  };
+
+  const toggleNewConversationPicker = () => {
+    if (showNewConv) {
+      closeNewConversationPicker();
+    } else {
+      openNewConversationPicker();
+    }
+  };
+
+  const startNewConversation = (user: ContactOption) => {
+    if (!canContactRole(user.role)) {
+      toast.error("Vous pouvez uniquement contacter un administrateur.");
+      return;
+    }
+
+    if (recording) {
+      toast.error(
+        "Terminez l'enregistrement vocal avant de changer de discussion.",
+      );
+      return;
+    }
+
+    if (selectedConv) {
+      draftsRef.current.set(selectedConv.otherId, newMessage);
+    }
+
+    const conv: Conversation = {
+      otherId: user.id,
+      otherNom: user.nom,
+      otherRole: user.role,
+      lastMessage: "",
+      lastDate: "",
+      unread: 0,
+      closed: false,
+      closedBy: null,
+    };
+    setConversations((prev) => {
+      if (prev.some((c) => c.otherId === user.id)) return prev;
+      return [conv, ...prev];
+    });
+    setSelectedConv(conv);
+    setNewMessage(draftsRef.current.get(user.id) ?? "");
+    setReplyingTo(null);
+    setEditingMsg(null);
+    closeNewConversationPicker();
+    window.setTimeout(() => inputRef.current?.focus(), 120);
+  };
+
   const closeConversation = async (otherId: string) => {
-    const { error } = await supabase.from('messages').update({ closed: true, closed_by: currentUserId, closed_at: new Date().toISOString() })
-      .or(`and(sender_id.eq.${currentUserId},receiver_id.eq.${otherId}),and(sender_id.eq.${otherId},receiver_id.eq.${currentUserId})`).eq('closed', false);
-    if (error) { toast.error('Erreur.'); return; }
-    setConversations(prev => prev.map(c => c.otherId === otherId ? { ...c, closed: true, closedBy: currentUserId } : c));
-    if (selectedConv?.otherId === otherId) setSelectedConv(prev => prev ? { ...prev, closed: true, closedBy: currentUserId } : null);
-    toast.success('Discussion fermée.');
+    const { error } = await supabase
+      .from("messages")
+      .update({
+        closed: true,
+        closed_by: currentUserId,
+        closed_at: new Date().toISOString(),
+      })
+      .or(
+        `and(sender_id.eq.${currentUserId},receiver_id.eq.${otherId}),and(sender_id.eq.${otherId},receiver_id.eq.${currentUserId})`,
+      )
+      .eq("closed", false);
+    if (error) {
+      toast.error("Impossible de fermer la discussion.");
+      return false;
+    }
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.otherId === otherId
+          ? { ...c, closed: true, closedBy: currentUserId }
+          : c,
+      ),
+    );
+    if (selectedConv?.otherId === otherId)
+      setSelectedConv((prev) =>
+        prev ? { ...prev, closed: true, closedBy: currentUserId } : null,
+      );
+    toast.success("Discussion fermée.");
+    return true;
   };
 
   const reopenConversation = async (otherId: string) => {
-    const { error } = await supabase.from('messages').update({ closed: false, closed_by: null, closed_at: null })
-      .or(`and(sender_id.eq.${currentUserId},receiver_id.eq.${otherId}),and(sender_id.eq.${otherId},receiver_id.eq.${currentUserId})`).eq('closed', true);
-    if (error) { toast.error('Erreur.'); return; }
-    setConversations(prev => prev.map(c => c.otherId === otherId ? { ...c, closed: false, closedBy: null } : c));
-    if (selectedConv?.otherId === otherId) setSelectedConv(prev => prev ? { ...prev, closed: false, closedBy: null } : null);
-    toast.success('Discussion rouverte.');
+    const { error } = await supabase
+      .from("messages")
+      .update({ closed: false, closed_by: null, closed_at: null })
+      .or(
+        `and(sender_id.eq.${currentUserId},receiver_id.eq.${otherId}),and(sender_id.eq.${otherId},receiver_id.eq.${currentUserId})`,
+      )
+      .eq("closed", true);
+    if (error) {
+      toast.error("Erreur.");
+      return;
+    }
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.otherId === otherId ? { ...c, closed: false, closedBy: null } : c,
+      ),
+    );
+    if (selectedConv?.otherId === otherId)
+      setSelectedConv((prev) =>
+        prev ? { ...prev, closed: false, closedBy: null } : null,
+      );
+    toast.success("Discussion rouverte.");
   };
 
-  // Profile drawer
-  const loadProfile = async (userId: string) => {
-    const { data } = await supabase.from('profils').select('id, nom, role, email, telephone, avatar_url, last_seen').eq('id', userId).maybeSingle();
-    if (data) { setActiveProfile(data as Profile); setShowProfile(true); }
-  };
+  const confirmPendingAction = async () => {
+    if (!confirmAction || confirmingAction) return;
 
-  // Message search
-  const searchMessages = async (q: string) => {
-    setMsgSearch(q);
-    if (q.length < 2 || !selectedConv) { setMsgSearchResults([]); return; }
-    const res = await fetch(`/api/messages/search?userId=${currentUserId}&otherId=${selectedConv.otherId}&q=${encodeURIComponent(q)}`);
-    const data = await res.json();
-    setMsgSearchResults(data.results || []);
-  };
-
-  // Export
-  const exportConversation = async (format: 'csv' | 'pdf') => {
-    if (!selectedConv) return;
-    const res = await fetch('/api/messages/export', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: currentUserId, otherId: selectedConv.otherId, format }),
-    });
-    if (format === 'csv') {
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `discussion-${selectedConv.otherNom}-${new Date().toISOString().slice(0, 10)}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } else {
-      const html = await res.text();
-      const win = window.open('', '_blank');
-      if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 500); }
+    setConfirmingAction(true);
+    try {
+      let succeeded = false;
+      if (confirmAction.kind === "closeConversation") {
+        succeeded = await closeConversation(confirmAction.otherId);
+      }
+      if (succeeded) setConfirmAction(null);
+    } finally {
+      setConfirmingAction(false);
     }
   };
 
-  // Delete expired ephemeral messages
+  const loadProfile = async (userId: string) => {
+    const conversation = conversations.find((c) => c.otherId === userId);
+
+    setProfileLoading(true);
+    setActiveProfile({
+      id: userId,
+      nom: conversation?.otherNom ?? selectedConv?.otherNom ?? "Utilisateur",
+      role: conversation?.otherRole ?? selectedConv?.otherRole ?? "secretaire",
+    });
+    setShowProfile(true);
+
+    const { data: fullProfile, error } = await supabase
+      .from("profils")
+      .select("id, nom, role, email, telephone")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("[ChatWindow] loadProfile details unavailable:", error);
+      setProfileLoading(false);
+      return;
+    }
+
+    if (fullProfile) {
+      setActiveProfile({
+        id: fullProfile.id,
+        nom: fullProfile.nom,
+        role: fullProfile.role,
+        email: fullProfile.email,
+        telephone: fullProfile.telephone,
+      });
+    }
+
+    setProfileLoading(false);
+  };
+
+  const searchMessages = async (q: string) => {
+    setMsgSearch(q);
+    const normalizedQuery = q.trim();
+    const requestId = ++messageSearchRequestRef.current;
+
+    if (normalizedQuery.length < 2 || !selectedConv) {
+      setMsgSearchResults([]);
+      setSearchingMessages(false);
+      return;
+    }
+
+    setSearchingMessages(true);
+    try {
+      const response = await fetch(
+        `/api/messages/search?userId=${encodeURIComponent(currentUserId)}&otherId=${encodeURIComponent(selectedConv.otherId)}&q=${encodeURIComponent(normalizedQuery)}`,
+      );
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const data = await response.json();
+      if (requestId === messageSearchRequestRef.current) {
+        setMsgSearchResults(data.results || []);
+      }
+    } catch (error) {
+      console.error("[ChatWindow] searchMessages error:", error);
+      if (requestId === messageSearchRequestRef.current) {
+        setMsgSearchResults([]);
+      }
+    } finally {
+      if (requestId === messageSearchRequestRef.current) {
+        setSearchingMessages(false);
+      }
+    }
+  };
+
+  const revealSearchResult = async (result: SearchHit) => {
+    if (!selectedConv) return;
+
+    if (!messages.some((message) => message.id === result.id)) {
+      const { data, error } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("id", result.id)
+        .maybeSingle();
+
+      const belongsToConversation =
+        data &&
+        ((data.sender_id === currentUserId &&
+          data.receiver_id === selectedConv.otherId) ||
+          (data.sender_id === selectedConv.otherId &&
+            data.receiver_id === currentUserId));
+
+      if (error || !data || !belongsToConversation) {
+        toast.error("Ce message n'est plus disponible.");
+        return;
+      }
+
+      setMessages((previous) => {
+        if (previous.some((message) => message.id === data.id)) return previous;
+        return [...previous, data as Message].sort(
+          (a, b) =>
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        );
+      });
+    }
+
+    setHighlightedMessageId(result.id);
+    window.setTimeout(() => {
+      document.getElementById(`message-${result.id}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 50);
+    window.setTimeout(() => setHighlightedMessageId(null), 2200);
+  };
+
+  const exportConversation = async (format: "csv" | "pdf") => {
+    if (!selectedConv) return;
+
+    try {
+      const response = await fetch("/api/messages/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: currentUserId,
+          otherId: selectedConv.otherId,
+          format,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      if (format === "csv") {
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `discussion-${selectedConv.otherNom}-${new Date()
+          .toISOString()
+          .slice(0, 10)}.csv`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
+
+      const html = await response.text();
+      const printWindow = window.open("", "_blank");
+      if (printWindow) {
+        printWindow.document.write(html);
+        printWindow.document.close();
+        window.setTimeout(() => printWindow.print(), 500);
+      }
+    } catch (error) {
+      console.error("[ChatWindow] export error:", error);
+      toast.error("L'export n'a pas pu être généré.");
+    }
+  };
+
   useEffect(() => {
     const interval = setInterval(() => {
-      setMessages(prev => prev.filter(m => {
-        if (m.ephemeral && m.expires_at && new Date(m.expires_at) < new Date()) return false;
-        return true;
-      }));
+      setMessages((prev) =>
+        prev.filter((m) => {
+          if (
+            m.ephemeral &&
+            m.expires_at &&
+            new Date(m.expires_at) < new Date()
+          )
+            return false;
+          return true;
+        }),
+      );
     }, 10_000);
     return () => clearInterval(interval);
   }, []);
 
-  // Copy message
   const copyMessage = async (content: string) => {
-    await navigator.clipboard.writeText(content);
-    toast.success('Message copié !');
-  };
-
-  // Emoji picker
-  const EMOJI_LIST = ['👍', '❤️', '😂', '😮', '😢', '🙏', '👋', '🎉', '🔥', '💯', '✅', '❌', '⏰', '💬', '📎'];
-
-  const addReaction = async (msgId: number, emoji: string) => {
-    const msg = messages.find(m => m.id === msgId);
-    if (!msg) return;
-    const reactions = msg.reactions ? { ...msg.reactions } : {};
-    const users = reactions[emoji] || [];
-    if (users.includes(currentUserId)) {
-      reactions[emoji] = users.filter(u => u !== currentUserId);
-      if (reactions[emoji].length === 0) delete reactions[emoji];
-    } else {
-      reactions[emoji] = [...users, currentUserId];
+    try {
+      await navigator.clipboard.writeText(content);
+      toast.success("Message copié.");
+    } catch (error) {
+      console.error("[ChatWindow] copyMessage error:", error);
+      toast.error("Le message n'a pas pu être copié.");
     }
-    await supabase.from('messages').update({ reactions }).eq('id', msgId);
-    setMessages(prev => prev.map(m => m.id === msgId ? { ...m, reactions } : m));
-    setShowEmoji(false);
   };
 
-  // Edit message
   const startEdit = (msg: Message) => {
     setEditingMsg(msg);
     setEditContent(msg.content);
@@ -587,89 +1605,212 @@ export default function ChatWindow({ currentUserId, currentRole, adminId }: Prop
 
   const saveEdit = async () => {
     if (!editingMsg || !editContent.trim()) return;
-    await supabase.from('messages').update({ content: editContent.trim() }).eq('id', editingMsg.id);
-    setMessages(prev => prev.map(m => m.id === editingMsg.id ? { ...m, content: editContent.trim() } : m));
+    const { error } = await supabase
+      .from("messages")
+      .update({ content: editContent.trim() })
+      .eq("id", editingMsg.id);
+    if (error) {
+      toast.error("La modification n'a pas pu être enregistrée.");
+      return;
+    }
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === editingMsg.id ? { ...m, content: editContent.trim() } : m,
+      ),
+    );
     setEditingMsg(null);
-    setEditContent('');
-    toast.success('Message modifié.');
+    setEditContent("");
+    toast.success("Message modifié.");
   };
 
-  // Voice recording
   const startRecording = async () => {
+    if (!selectedConv || !canContactRole(selectedConv.otherRole)) {
+      toast.error("Vous pouvez uniquement contacter un administrateur.");
+      return;
+    }
+
+    if (
+      typeof MediaRecorder === "undefined" ||
+      !navigator.mediaDevices?.getUserMedia
+    ) {
+      toast.error("L'enregistrement vocal n'est pas pris en charge ici.");
+      return;
+    }
+
+    let stream: MediaStream | null = null;
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          autoGainControl: true,
+          echoCancellation: true,
+          noiseSuppression: true,
+          channelCount: 1,
+        },
+      });
+      const activeStream = stream;
+      const selectedMimeType = preferredRecordingMimeType();
+      const recorder = selectedMimeType
+        ? new MediaRecorder(activeStream, { mimeType: selectedMimeType })
+        : new MediaRecorder(activeStream);
+      recordingMimeTypeRef.current =
+        recorder.mimeType || selectedMimeType || "audio/webm";
       const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-      recorder.onstop = () => {
-        setAudioChunks(chunks);
-        stream.getTracks().forEach(t => t.stop());
+      cancelRecordingRef.current = false;
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
       };
-      recorder.start();
+      recorder.onstop = () => {
+        console.log("[recorder.onstop] chunks:", chunks.length, "cancel:", cancelRecordingRef.current);
+        setAudioChunks(chunks);
+        activeStream.getTracks().forEach((track) => track.stop());
+        setRecording(false);
+        setMediaRecorder(null);
+        if (cancelRecordingRef.current) {
+          cancelRecordingRef.current = false;
+          setAudioChunks([]);
+          return;
+        }
+        if (chunks.length === 0) {
+          toast.error("Aucun son n'a été capturé. Vérifiez votre microphone.");
+          return;
+        }
+        window.setTimeout(() => {
+          void sendAudio();
+        }, 0);
+      };
+      recorder.start(250);
       setMediaRecorder(recorder);
       setRecording(true);
     } catch {
-      toast.error('Microphone non autorisé.');
+      stream?.getTracks().forEach((track) => track.stop());
+      toast.error("Microphone non autorisé.");
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    console.log("[stopRecording] mediaRecorder:", mediaRecorder?.state);
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      try {
+        mediaRecorder.requestData();
+      } catch {
+        // Certains navigateurs produisent déjà le dernier bloc lors de stop().
+      }
       mediaRecorder.stop();
     }
     setRecording(false);
   };
 
+  const cancelRecording = () => {
+    cancelRecordingRef.current = true;
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      mediaRecorder.stop();
+    }
+    setRecording(false);
+    toast.success("Enregistrement annulé.");
+  };
+
   const sendAudio = async () => {
+    console.log("[sendAudio] appelé, chunks ref:", audioChunksRef.current.length, "selectedConv:", !!selectedConv);
     const chunks = audioChunksRef.current;
-    if (chunks.length === 0 || !selectedConv) return;
-    const blob = new Blob(chunks, { type: 'audio/webm' });
-    const ext = 'webm';
-    const fileName = `voice-${Date.now()}.${ext}`;
-    const filePath = `chat-audio/${currentUserId}/${fileName}`;
+    if (
+      chunks.length === 0 ||
+      !selectedConv ||
+      !canContactRole(selectedConv.otherRole)
+    )
+      return;
+    setSending(true);
+    const audioType =
+      recordingMimeTypeRef.current || chunks[0]?.type || "audio/webm";
+    const rawBlob = new Blob(chunks, { type: audioType });
+    let storedPath: string | null = null;
 
-    const { error: uploadError } = await supabase.storage.from('chat-audio').upload(filePath, blob);
-    if (uploadError) { toast.error('Erreur envoi vocal.'); return; }
+    try {
+      if (rawBlob.size === 0) {
+        throw new Error("Enregistrement audio vide");
+      }
 
-    const { data: urlData } = supabase.storage.from('chat-audio').getPublicUrl(filePath);
+      console.log("[sendAudio] rawBlob:", rawBlob.size, "bytes, type:", audioType);
 
-    const replyToId = replyingTo?.id || null;
-    const { data, error } = await supabase.from('messages').insert({
-      sender_id: currentUserId,
-      receiver_id: selectedConv.otherId,
-      content: '🎤 Message vocal',
-      file_url: urlData.publicUrl,
-      file_type: 'audio/webm',
-      file_name: fileName,
-      ephemeral: ephemeralMode !== null,
-      expires_at: ephemeralMode ? new Date(Date.now() + ephemeralMode).toISOString() : null,
-      reply_to: replyToId,
-    }).select().single();
+      let uploadBlob: Blob;
+      let uploadType: string;
+      let uploadExt: string;
+      try {
+        uploadBlob = await convertBlobToMp3(rawBlob);
+        uploadType = "audio/mpeg";
+        uploadExt = "mp3";
+        console.log("[sendAudio] MP3 converti:", uploadBlob.size, "bytes");
+      } catch (convError) {
+        console.warn("[sendAudio] Conversion MP3 échouée, fallback brut:", convError);
+        uploadBlob = rawBlob;
+        uploadType = audioType;
+        uploadExt = audioFileExtension(audioType);
+      }
 
-    if (!error && data) {
-      setMessages(prev => [...prev, data]);
+      const fileName = `voice-${Date.now()}.${uploadExt}`;
+      const filePath = `${currentUserId}/${fileName}`;
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from(CHAT_FILES_BUCKET)
+        .upload(filePath, uploadBlob, {
+          cacheControl: "3600",
+          contentType: uploadType,
+          upsert: false,
+        });
+      if (uploadError) throw uploadError;
+      storedPath = filePath;
+      console.log("[sendAudio] upload OK, path:", uploadData?.path);
+
+      const { data: urlData } = supabase.storage
+        .from(CHAT_FILES_BUCKET)
+        .getPublicUrl(filePath);
+      console.log("[sendAudio] public URL:", urlData.publicUrl);
+
+      const data = await insertAttachmentMessage({
+        receiverId: selectedConv.otherId,
+        content: "🎤 Message vocal",
+        fileUrl: urlData.publicUrl,
+      });
+
+      setMessages((previous) =>
+        previous.some((message) => message.id === data.id)
+          ? previous
+          : [...previous, data],
+      );
       setAudioChunks([]);
-      setReplyingTo(null);
+      storedPath = null;
       scrollToBottom();
-      fetchConversations();
+      void fetchConversations();
+    } catch (error) {
+      console.error("[ChatWindow] sendAudio error:", error);
+      if (storedPath) {
+        void supabase.storage.from(CHAT_FILES_BUCKET).remove([storedPath]);
+      }
+      toast.error("Le message vocal n'a pas pu être envoyé.");
+    } finally {
+      setSending(false);
     }
   };
 
-  // Pin message
-  const pinMessage = async (msgId: number) => {
-    const msg = messages.find(m => m.id === msgId);
-    if (!msg) return;
-    const newPinned = !msg.pinned;
-    await supabase.from('messages').update({ pinned: newPinned, pinned_by: newPinned ? currentUserId : null, pinned_at: newPinned ? new Date().toISOString() : null }).eq('id', msgId);
-    setMessages(prev => prev.map(m => m.id === msgId ? { ...m, pinned: newPinned, pinned_by: newPinned ? currentUserId : null } : m));
-    toast.success(newPinned ? 'Message épinglé.' : 'Désépinglé.');
-  };
+  useEffect(() => {
+    return () => {
+      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        cancelRecordingRef.current = true;
+        mediaRecorder.stop();
+      }
+    };
+  }, [mediaRecorder]);
 
-  // Mentions search
   const searchMentions = async (q: string) => {
-    setMentionQuery(q);
-    if (q.length < 1) { setShowMentions(false); return; }
-    const { data } = await supabase.from('profils').select('id, nom, role').ilike('nom', `%${q}%`).limit(5);
+    if (q.length < 1) {
+      setShowMentions(false);
+      return;
+    }
+    const { data } = await supabase
+      .from("profils")
+      .select("id, nom, role")
+      .ilike("nom", `%${q}%`)
+      .limit(5);
     if (data && data.length > 0) {
       setMentionUsers(data);
       setShowMentions(true);
@@ -679,497 +1820,2166 @@ export default function ChatWindow({ currentUserId, currentRole, adminId }: Prop
   };
 
   const insertMention = (user: { nom: string }) => {
-    const parts = newMessage.split('@');
+    const parts = newMessage.split("@");
     parts.pop();
-    setNewMessage(parts.join('@') + `@${user.nom} `);
+    setNewMessage(parts.join("@") + `@${user.nom} `);
     setShowMentions(false);
-    setMentionQuery('');
     inputRef.current?.focus();
   };
 
-  // Drag & Drop
-  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setDragOver(true); };
+  const handleDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    if (
+      selectedConv &&
+      !selectedConv.closed &&
+      canContactRole(selectedConv.otherRole)
+    ) {
+      setDragOver(true);
+    }
+  };
   const handleDragLeave = () => setDragOver(false);
-  const handleDrop = async (e: React.DragEvent) => {
+  const handleDrop = async (e: DragEvent) => {
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files?.[0];
-    if (!file || !selectedConv) return;
-    const ext = file.name.split('.').pop();
-    const path = `${currentUserId}/${Date.now()}.${ext}`;
-    const { data, error } = await supabase.storage.from('chat-files').upload(path, file, { contentType: file.type });
-    if (error) { toast.error('Erreur upload : ' + error.message); return; }
-    const { data: urlData } = supabase.storage.from('chat-files').getPublicUrl(data.path);
-    await supabase.from('messages').insert({
-      sender_id: currentUserId,
-      receiver_id: selectedConv.otherId,
-      content: file.name,
-      read: false,
-      file_url: urlData.publicUrl,
-      file_type: file.type,
-      file_name: file.name,
-      reply_to: replyingTo?.id || null,
-    });
-    setReplyingTo(null);
-    fetchConversations();
-    toast.success('Fichier envoyé !');
+    if (file) await uploadFile(file);
   };
 
-  // Render ticks
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    };
+  }, []);
+
   const renderTicks = (msg: Message) => {
     if (msg.sender_id !== currentUserId) return null;
+    if (msg.id < 0) {
+      return (
+        <span className="ml-1 inline-flex text-blue-100" title="Envoi en cours">
+          <SpinnerIcon />
+          <span className="sr-only">Envoi en cours</span>
+        </span>
+      );
+    }
     if (msg.read_at) {
-      return <span className="text-blue-400 ml-1" title="Lu"><svg className="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></span>;
+      return (
+        <span className="text-blue-400 ml-1" title="Lu">
+          <svg
+            className="w-4 h-4 inline"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+        </span>
+      );
     }
     if (msg.read) {
-      return <span className="text-blue-400 ml-1" title="Envoyé"><svg className="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg></span>;
+      return (
+        <span className="text-blue-400 ml-1" title="Envoyé">
+          <svg
+            className="w-4 h-4 inline"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M5 13l4 4L19 7"
+            />
+          </svg>
+        </span>
+      );
     }
-    return <span className="text-slate-300 ml-1" title="Envoyé"><svg className="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg></span>;
+    return (
+      <span className="text-slate-300 ml-1" title="Envoyé">
+        <svg
+          className="w-4 h-4 inline"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M5 13l4 4L19 7"
+          />
+        </svg>
+      </span>
+    );
   };
 
-  if (loading) return (
-    <div className={`flex h-[75vh] rounded-2xl border overflow-hidden shadow-[0_8px_24px_rgba(0,0,0,0.04)] ${dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-slate-100'}`}>
-      <div className={`w-80 border-r ${dark ? 'border-gray-700 bg-gray-900/30' : 'border-slate-100 bg-slate-50/30'}`}>
-        <div className={`p-4 border-b ${dark ? 'border-gray-700' : 'border-slate-100'}`}>
-          <div className="h-4 bg-slate-200 dark:bg-gray-700 rounded animate-pulse w-24" />
-        </div>
-        <div className="p-3 space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-gray-700 animate-pulse" />
-              <div className="flex-1 space-y-2">
-                <div className="h-3 bg-slate-200 dark:bg-gray-700 rounded animate-pulse w-1/2" />
-                <div className="h-2 bg-slate-200 dark:bg-gray-700 rounded animate-pulse w-3/4" />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="flex-1 flex items-center justify-center">
-        <SkeletonChat />
-      </div>
-    </div>
+  const visibleConversations = useMemo(() => {
+    const query = conversationSearch.trim().toLocaleLowerCase("fr-FR");
+
+    return conversations.filter((conv) => {
+      if (!showClosed && conv.closed) return false;
+      if (!query) return true;
+
+      return [conv.otherNom, roleLabel(conv.otherRole), conv.lastMessage]
+        .join(" ")
+        .toLocaleLowerCase("fr-FR")
+        .includes(query);
+    });
+  }, [conversationSearch, conversations, showClosed]);
+
+  const unreadTotal = useMemo(
+    () => conversations.reduce((total, conv) => total + conv.unread, 0),
+    [conversations],
   );
 
-  const visibleConversations = showClosed ? conversations : conversations.filter(c => !c.closed);
-  const typingText = Array.from(typingUsers.values()).join(', ');
-  const filteredMessages = msgSearch ? messages.filter(m => !m.deleted && m.content.toLowerCase().includes(msgSearch.toLowerCase())) : messages;
+  const typingText = Array.from(typingUsers.values()).join(", ");
+
+  const filteredMessages = useMemo(() => {
+    const query = msgSearch.trim().toLocaleLowerCase("fr-FR");
+    if (!query) return messages;
+
+    return messages.filter(
+      (message) =>
+        message.content.toLocaleLowerCase("fr-FR").includes(query),
+    );
+  }, [messages, msgSearch]);
+
+  const retryLoad = async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      await fetchConversations();
+    } catch (error) {
+      console.error("[ChatWindow] retryLoad error:", error);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return <ChatWindowSkeleton />;
+  }
+
+  if (loadError) {
+    return <ChatLoadError onRetry={() => void retryLoad()} />;
+  }
 
   return (
-    <div className={`flex h-[75vh] rounded-2xl border overflow-hidden shadow-[0_8px_24px_rgba(0,0,0,0.04)] ${dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-slate-100'}`}>
-      {/* Sidebar */}
-      <div className={`w-80 border-r flex flex-col ${dark ? 'border-gray-700 bg-gray-900/30' : 'border-slate-100 bg-slate-50/30'}`}>
-        <div className={`p-4 border-b flex items-center justify-between ${dark ? 'border-gray-700' : 'border-slate-100'}`}>
-          <h2 className={`font-black tracking-tight text-sm ${dark ? 'text-white' : 'text-slate-900'}`}>
-            {currentRole === 'admin' ? 'Conversations' : 'Discussions'}
-          </h2>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setShowMsgSearch(!showMsgSearch)} className={`text-[10px] font-bold px-2 py-1 rounded-md transition ${showMsgSearch ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300' : dark ? 'bg-gray-700 text-gray-400 hover:bg-gray-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`} title="Rechercher dans les messages">🔍</button>
-            <button onClick={() => setShowClosed(!showClosed)} className={`text-[10px] font-bold px-2 py-1 rounded-md transition ${showClosed ? (dark ? 'bg-gray-600 text-gray-200' : 'bg-slate-200 text-slate-700') : dark ? 'bg-gray-700 text-gray-400 hover:bg-gray-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`} title={showClosed ? 'Masquer les fermées' : 'Afficher les fermées'}>
-              {showClosed ? '📋' : '🗄️'}
+    <div className="relative isolate flex h-full min-h-[560px] w-full overflow-hidden bg-white text-slate-900 md:rounded-[28px] md:border md:border-slate-200/80 md:shadow-[0_24px_70px_rgba(15,23,42,0.10)]">
+      <aside
+        className={`${
+          selectedConv ? "hidden md:flex" : "flex"
+        } w-full shrink-0 flex-col border-r md:w-[350px] lg:w-[390px] border-slate-200/80 bg-slate-50/80`}
+      >
+        <div className="border-b border-slate-200/80 bg-white/80 px-4 pb-4 pt-4 backdrop-blur-xl sm:px-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="truncate text-base font-black tracking-tight text-slate-950">
+                  Messagerie
+                </h2>
+
+                {unreadTotal > 0 && (
+                  <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-black text-white">
+                    {unreadTotal > 99 ? "99+" : unreadTotal}
+                  </span>
+                )}
+              </div>
+
+              <p className="mt-0.5 text-xs font-medium text-slate-500">
+                {unreadTotal > 0
+                  ? `${unreadTotal} message${unreadTotal > 1 ? "s" : ""} non lu${unreadTotal > 1 ? "s" : ""}`
+                  : `${conversations.length} discussion${conversations.length > 1 ? "s" : ""}`}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={toggleNewConversationPicker}
+              className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-3 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              aria-expanded={showNewConv}
+            >
+              <PlusIcon />
+              <span className="hidden lg:inline">Nouveau</span>
             </button>
-            <button onClick={() => setShowNewConv(!showNewConv)} className="bg-blue-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-blue-700 transition shadow-sm">+ Nouvelle</button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="relative flex-1">
+              <span className="sr-only">Rechercher une conversation</span>
+              <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+                <SearchIcon />
+              </span>
+              <input
+                type="search"
+                value={conversationSearch}
+                onChange={(event) => setConversationSearch(event.target.value)}
+                placeholder="Rechercher…"
+                className="h-10 w-full rounded-xl border py-2 pl-10 pr-3 text-sm outline-none transition focus:ring-2 focus:ring-blue-500/30 border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-blue-400"
+              />
+            </label>
+
+            <button
+              type="button"
+              onClick={() => setShowClosed((previous) => !previous)}
+              className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl border transition ${
+                showClosed
+                  ? "border-blue-200 bg-blue-50 text-blue-700"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+              title={
+                showClosed
+                  ? "Masquer les conversations fermées"
+                  : "Afficher les conversations fermées"
+              }
+              aria-label={
+                showClosed
+                  ? "Masquer les conversations fermées"
+                  : "Afficher les conversations fermées"
+              }
+            >
+              <ArchiveIcon />
+            </button>
           </div>
         </div>
 
-        {/* Message search panel */}
-        {showMsgSearch && (
-          <div className={`p-3 border-b ${dark ? 'border-gray-700 bg-gray-800' : 'border-slate-100 bg-white'}`}>
-            <input type="text" value={msgSearch} onChange={e => searchMessages(e.target.value)} placeholder="Rechercher dans les messages..." autoFocus
-              className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition ${dark ? 'bg-gray-700 border-gray-600 text-white' : 'border-slate-200'}`} />
-            {msgSearchResults.length > 0 && (
-              <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
-                {msgSearchResults.map(r => (
-                  <button key={r.id} className={`w-full text-left px-3 py-2 rounded-lg text-xs transition ${dark ? 'hover:bg-gray-700' : 'hover:bg-blue-50'}`}>
-                    <p className={`font-bold truncate ${dark ? 'text-gray-200' : 'text-slate-800'}`}>{r.content.slice(0, 60)}</p>
-                    <p className={`${dark ? 'text-gray-500' : 'text-slate-400'} mt-0.5`}>{new Date(r.created_at).toLocaleString('fr-FR')}</p>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* New conv panel */}
-        {showNewConv && currentRole !== 'admin' && adminId && (
-          <div className={`p-3 border-b ${dark ? 'border-gray-700 bg-gray-800' : 'border-slate-100 bg-white'}`}>
-            <div className="flex items-center gap-3 p-2">
-              <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-sm font-bold shrink-0">A</div>
-              <div className="min-w-0">
-                <p className={`text-sm font-bold ${dark ? 'text-white' : 'text-slate-900'}`}>Administration</p>
-                <p className={`text-xs ${dark ? 'text-gray-400' : 'text-slate-400'}`}>Contacter l&apos;administration</p>
-              </div>
-              <button onClick={() => startNewConversation({ id: adminId, nom: 'Administration', role: 'admin' })} className="ml-auto bg-blue-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-blue-700 transition shadow-sm">Démarrer</button>
-            </div>
-          </div>
-        )}
-
-        {showNewConv && currentRole === 'admin' && (
-          <div className={`p-3 border-b ${dark ? 'border-gray-700 bg-gray-800' : 'border-slate-100 bg-white'}`}>
-            <input type="text" value={searchTerm} onChange={e => searchUsers(e.target.value)} placeholder="Rechercher un utilisateur..." autoFocus
-              className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition ${dark ? 'bg-gray-700 border-gray-600 text-white' : 'border-slate-200'}`} />
-            {searchResults.length > 0 && (
-              <div className="mt-2 space-y-1">
-                {searchResults.map(u => (
-                  <button key={u.id} onClick={() => startNewConversation(u)} className={`w-full text-left px-3 py-2 rounded-lg transition flex items-center gap-2 ${dark ? 'hover:bg-gray-700' : 'hover:bg-blue-50'}`}>
-                    <div className="w-7 h-7 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold shrink-0">{u.nom.charAt(0).toUpperCase()}</div>
-                    <div className="min-w-0">
-                      <p className={`text-xs font-bold truncate ${dark ? 'text-gray-200' : 'text-slate-800'}`}>{u.nom}</p>
-                      <p className={`text-[10px] capitalize ${dark ? 'text-gray-500' : 'text-slate-400'}`}>{u.role}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Conversations list */}
-        <div className="flex-1 overflow-y-auto">
-          {visibleConversations.length === 0 ? (
-            <div className="p-6 text-center">
-              <p className={`text-sm italic font-medium mb-4 ${dark ? 'text-gray-400' : 'text-slate-400'}`}>
-                {currentRole === 'admin' ? 'Aucune conversation' : 'Aucune discussion'}
+        {showNewConv && (
+          <div className="border-b p-3 border-slate-200/80 bg-white">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-bold text-slate-700">
+                {currentRole === "admin"
+                  ? "Nouvelle conversation"
+                  : "Choisir un administrateur"}
               </p>
-              {currentRole !== 'admin' && adminId && (
-                <button onClick={() => setShowNewConv(true)} className="bg-blue-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-blue-700 transition shadow-sm">+ Nouvelle discussion</button>
+              <button
+                type="button"
+                onClick={closeNewConversationPicker}
+                className="grid h-7 w-7 place-items-center rounded-lg transition text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Fermer"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+
+            <p className="mb-3 text-[11px] leading-5 text-slate-500">
+              {currentRole === "admin"
+                ? "Recherchez une entreprise, un secrétaire ou un autre administrateur."
+                : "Choisissez l’administrateur avec lequel vous souhaitez échanger."}
+            </p>
+
+            <label className="relative block">
+              <span className="sr-only">
+                {currentRole === "admin"
+                  ? "Rechercher un utilisateur"
+                  : "Rechercher un administrateur"}
+              </span>
+              <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+                <SearchIcon />
+              </span>
+              <input
+                type="search"
+                value={searchTerm}
+                onChange={(event) => void searchUsers(event.target.value)}
+                placeholder={
+                  currentRole === "admin"
+                    ? "Rechercher un utilisateur…"
+                    : "Rechercher un administrateur…"
+                }
+                autoFocus
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white py-2 pl-10 pr-10 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+              />
+              {searchingUsers && (
+                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-blue-600">
+                  <SpinnerIcon />
+                </span>
+              )}
+            </label>
+
+            <div className="mt-3 flex items-center justify-between px-1">
+              <p className="text-[9px] font-black uppercase tracking-[0.14em] text-slate-400">
+                {searchTerm.trim()
+                  ? "Résultats"
+                  : currentRole === "admin"
+                    ? "Contacts disponibles"
+                    : "Administrateurs disponibles"}
+              </p>
+              {!searchingUsers && searchResults.length > 0 && (
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-500">
+                  {searchResults.length}
+                </span>
+              )}
+            </div>
+
+            {searchingUsers && searchResults.length === 0 ? (
+              <div
+                className="mt-2 space-y-1.5"
+                aria-label="Chargement des contacts"
+              >
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <div
+                    key={index}
+                    className="flex animate-pulse items-center gap-3 rounded-xl border border-slate-100 p-2.5"
+                  >
+                    <div className="h-9 w-9 rounded-full bg-slate-100" />
+                    <div className="flex-1">
+                      <div className="h-3 w-2/5 rounded bg-slate-100" />
+                      <div className="mt-2 h-2.5 w-1/4 rounded bg-slate-50" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : searchResults.length > 0 ? (
+              <div
+                className="mt-2 max-h-64 space-y-1 overflow-y-auto pr-1"
+                aria-live="polite"
+              >
+                {searchResults.map((user) => (
+                  <button
+                    key={user.id}
+                    type="button"
+                    onClick={() => startNewConversation(user)}
+                    className="group flex w-full items-center gap-3 rounded-xl border border-transparent p-2.5 text-left transition hover:border-blue-100 hover:bg-blue-50/60 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                  >
+                    <ChatAvatar name={user.nom} role={user.role} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold text-slate-800">
+                        {user.nom}
+                      </p>
+                      <div className="mt-1 flex min-w-0 items-center gap-2">
+                        <span
+                          className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wide ring-1 ring-inset ${rolePillClass(user.role)}`}
+                        >
+                          {roleLabel(user.role)}
+                        </span>
+                        {user.email && (
+                          <span className="min-w-0 truncate text-[10px] text-slate-400">
+                            {user.email}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-blue-600">
+                      <ChevronRightIcon />
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-2 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center">
+                <p className="text-xs font-bold text-slate-600">
+                  {currentRole === "admin"
+                    ? "Aucun contact trouvé"
+                    : "Aucun administrateur trouvé"}
+                </p>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  {searchTerm.trim()
+                    ? "Vérifiez l’orthographe du nom recherché."
+                    : "Aucun profil correspondant n’est disponible pour le moment."}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {visibleConversations.length === 0 ? (
+            <div className="flex h-full min-h-56 flex-col items-center justify-center px-6 text-center">
+              <div className="mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-white text-slate-400 shadow-sm ring-1 ring-slate-200">
+                <MessageIcon />
+              </div>
+              <p className="text-sm font-bold text-slate-700">
+                {conversationSearch
+                  ? "Aucun résultat"
+                  : showClosed
+                    ? "Aucune conversation"
+                    : "Aucune conversation active"}
+              </p>
+              <p className="mt-1 max-w-52 text-xs leading-5 text-slate-400">
+                {conversationSearch
+                  ? "Essayez avec un autre nom ou un autre mot-clé."
+                  : "Démarrez une nouvelle discussion pour commencer à échanger."}
+              </p>
+              {!conversationSearch && (
+                <button
+                  type="button"
+                  onClick={openNewConversationPicker}
+                  className="mt-4 text-xs font-bold text-blue-600 transition hover:text-blue-700"
+                >
+                  + Nouvelle conversation
+                </button>
               )}
             </div>
           ) : (
-            visibleConversations.map(c => (
-              <button key={c.otherId} onClick={() => { setSelectedConv(c); setShowProfile(false); setShowMsgSearch(false); setMsgSearchResults([]); }}
-                className={`w-full text-left px-4 py-3 border-b transition ${dark ? 'border-gray-700' : 'border-slate-50'} ${
-                  selectedConv?.otherId === c.otherId ? (dark ? 'bg-gray-700 border-l-2 border-l-blue-500' : 'bg-blue-50 border-l-2 border-l-blue-500') : (dark ? 'hover:bg-gray-700/50' : 'hover:bg-white')
-                }`}>
-                <div className="flex justify-between items-start gap-2">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
-                      c.otherRole === 'admin' ? 'bg-amber-100 text-amber-700' : c.otherRole === 'entreprise' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
-                    }`}>{c.otherNom.charAt(0).toUpperCase()}</div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <p className={`font-bold text-sm truncate ${dark ? 'text-white' : 'text-slate-900'}`}>{c.otherNom}</p>
-                        {c.closed && <span className="text-[9px] bg-slate-200 dark:bg-gray-600 text-slate-500 dark:text-gray-300 px-1.5 py-0.5 rounded-full font-bold">Fermée</span>}
-                      </div>
-                      <p className={`text-xs truncate ${dark ? 'text-gray-400' : 'text-slate-400'}`}>{c.lastMessage || 'Démarrer'}</p>
+            visibleConversations.map((conv) => {
+              const selected = selectedConv?.otherId === conv.otherId;
+              const draft = selected
+                ? newMessage.trim()
+                : draftsRef.current.get(conv.otherId)?.trim();
+
+              return (
+                <button
+                  key={conv.otherId}
+                  type="button"
+                  onClick={() => {
+                    if (recording) {
+                      toast.error(
+                        "Terminez l'enregistrement vocal avant de changer de discussion.",
+                      );
+                      return;
+                    }
+                    if (selectedConv) {
+                      draftsRef.current.set(selectedConv.otherId, newMessage);
+                    }
+                    setSelectedConv(conv);
+                    setNewMessage(draftsRef.current.get(conv.otherId) ?? "");
+                    messageSearchRequestRef.current += 1;
+                    setSearchingMessages(false);
+                    setShowProfile(false);
+                    setShowMsgSearch(false);
+                    setShowConversationMenu(false);
+                    setActiveMessageActions(null);
+                    setReplyingTo(null);
+                    setEditingMsg(null);
+                    setMsgSearch("");
+                    setMsgSearchResults([]);
+                  }}
+                  className={`group relative mb-1 flex w-full items-center gap-3 overflow-hidden rounded-2xl p-3 text-left transition ${
+                    selected
+                      ? "bg-white shadow-sm ring-1 ring-blue-100"
+                      : "hover:bg-white/80"
+                  }`}
+                >
+                  {selected && (
+                    <span className="absolute inset-y-3 left-0 w-0.5 rounded-r-full bg-blue-600" />
+                  )}
+                  <div className="relative shrink-0">
+                    <ChatAvatar
+                      name={conv.otherNom}
+                      role={conv.otherRole}
+                      size="md"
+                    />
+                    <span
+                      className={`absolute -bottom-0.5 -right-0.5 grid h-4 w-4 place-items-center rounded-full border-2 border-white text-[7px] font-black leading-none text-white ${roleDotClass(conv.otherRole)}`}
+                      title={roleLabel(conv.otherRole)}
+                      aria-label={roleLabel(conv.otherRole)}
+                    >
+                      {roleLabel(conv.otherRole).charAt(0)}
+                    </span>
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p
+                        className={`min-w-0 flex-1 truncate text-sm ${
+                          conv.unread > 0 ? "font-black" : "font-bold"
+                        } text-slate-900`}
+                      >
+                        {conv.otherNom}
+                      </p>
+
+                      {conv.lastDate && (
+                        <span
+                          className={`shrink-0 text-[10px] font-medium ${
+                            conv.unread > 0 ? "text-blue-600" : "text-slate-400"
+                          }`}
+                        >
+                          {formatConversationDate(conv.lastDate)}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-1 flex items-center gap-2">
+                      <p
+                        className={`min-w-0 flex-1 truncate text-xs ${
+                          draft
+                            ? "font-semibold text-amber-600"
+                            : conv.unread > 0
+                              ? "font-semibold text-slate-700"
+                              : "text-slate-500"
+                        }`}
+                      >
+                        {draft
+                          ? `Brouillon : ${draft}`
+                          : conv.lastMessage || "Nouvelle conversation"}
+                      </p>
+
+                      {conv.closed ? (
+                        <span className="shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold bg-slate-100 text-slate-500">
+                          Fermée
+                        </span>
+                      ) : conv.unread > 0 ? (
+                        <span className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 px-1.5 py-0.5 text-[9px] font-black text-white">
+                          {conv.unread > 99 ? "99+" : conv.unread}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    {c.unread > 0 && <span className="bg-blue-600 text-white text-[10px] font-black rounded-full w-5 h-5 flex items-center justify-center">{c.unread}</span>}
-                    {c.lastDate && <p className={`text-[10px] mt-1 ${dark ? 'text-gray-500' : 'text-slate-400'}`}>{new Date(c.lastDate).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}</p>}
-                  </div>
-                </div>
-              </button>
-            ))
+                </button>
+              );
+            })
           )}
         </div>
-      </div>
 
-      {/* Chat area */}
-      <div className="flex-1 flex flex-col">
+        <div className="border-t border-slate-200/70 bg-white/60 px-4 py-3">
+          <div className="flex items-center justify-between text-[10px] font-semibold text-slate-400">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="grid h-5 w-5 place-items-center rounded-md bg-blue-600 text-white">
+                <MessageIcon />
+              </span>
+              Secrétariat Pro
+            </span>
+            <span className="inline-flex items-center gap-1 text-emerald-600">
+              <ShieldIcon />
+              Échanges sécurisés
+            </span>
+          </div>
+        </div>
+      </aside>
+
+      <section
+        className={`${
+          selectedConv ? "flex" : "hidden md:flex"
+        } min-w-0 flex-1 flex-col bg-white`}
+      >
         {selectedConv ? (
           <>
-            {/* Header */}
-            <div className={`p-4 border-b flex items-center justify-between ${dark ? 'border-gray-700 bg-gray-800' : 'border-slate-100 bg-white'}`}>
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ${
-                  selectedConv.otherRole === 'admin' ? 'bg-amber-100 text-amber-700' : selectedConv.otherRole === 'entreprise' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
-                }`}>{selectedConv.otherNom.charAt(0).toUpperCase()}</div>
-                <div>
-                  <h3 className={`font-black tracking-tight ${dark ? 'text-white' : 'text-slate-900'}`}>{selectedConv.otherNom}</h3>
-                  <p className={`text-xs font-medium capitalize ${dark ? 'text-gray-400' : 'text-slate-400'}`}>
-                    {selectedConv.otherRole === 'admin' ? 'Administrateur' : selectedConv.otherRole === 'entreprise' ? 'Entreprise' : 'Secrétaire'}
-                  </p>
+            <header className="relative flex min-h-[72px] shrink-0 items-center justify-between gap-3 border-b px-3 py-3 sm:px-4 border-slate-200/80 bg-white/95 backdrop-blur">
+              <div className="flex min-w-0 items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (recording) {
+                      toast.error(
+                        "Terminez l'enregistrement vocal avant de quitter la discussion.",
+                      );
+                      return;
+                    }
+                    draftsRef.current.set(selectedConv.otherId, newMessage);
+                    setSelectedConv(null);
+                    setShowProfile(false);
+                    setShowConversationMenu(false);
+                  }}
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border md:hidden border-slate-200 bg-white text-slate-600"
+                  aria-label="Retour aux conversations"
+                >
+                  <BackIcon />
+                </button>
+
+                <div className="relative shrink-0">
+                  <ChatAvatar
+                    name={selectedConv.otherNom}
+                    role={selectedConv.otherRole}
+                    size="md"
+                  />
+                  <span
+                    className={`absolute -bottom-0.5 -right-0.5 grid h-4 w-4 place-items-center rounded-full border-2 border-white text-[7px] font-black leading-none text-white ${roleDotClass(selectedConv.otherRole)}`}
+                    title={roleLabel(selectedConv.otherRole)}
+                    aria-label={roleLabel(selectedConv.otherRole)}
+                  >
+                    {roleLabel(selectedConv.otherRole).charAt(0)}
+                  </span>
+                </div>
+
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-black sm:text-base text-slate-950">
+                    {selectedConv.otherNom}
+                  </h3>
+                  <div
+                    className="mt-0.5 flex items-center gap-1.5"
+                    aria-live="polite"
+                  >
+                    <span
+                      className={`text-[11px] font-medium ${
+                        typingText ? "text-blue-600" : "text-slate-500"
+                      }`}
+                    >
+                      {typingText
+                        ? `${typingText} écrit…`
+                        : roleLabel(selectedConv.otherRole)}
+                    </span>
+                    {!typingText && (
+                      <>
+                        <span className="text-[10px] text-slate-300">•</span>
+                        <span className="hidden text-[11px] sm:inline text-slate-400">
+                          Canal sécurisé
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                {currentRole === 'admin' && (
-                  <button onClick={() => loadProfile(selectedConv.otherId)} className={`text-xs font-bold px-3 py-2 rounded-lg transition flex items-center gap-1.5 ${dark ? 'bg-gray-700 hover:bg-gray-600 text-gray-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>
-                    <span>🪪</span><span>Profil</span>
+
+              <div className="relative flex shrink-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMsgSearch((previous) => {
+                      const next = !previous;
+                      if (!next) {
+                        setMsgSearch("");
+                        setMsgSearchResults([]);
+                        setSearchingMessages(false);
+                        messageSearchRequestRef.current += 1;
+                      }
+                      return next;
+                    });
+                    setShowConversationMenu(false);
+                  }}
+                  className={`grid h-9 w-9 place-items-center rounded-xl transition ${
+                    showMsgSearch
+                      ? "bg-blue-50 text-blue-700"
+                      : "text-slate-500 hover:bg-slate-100"
+                  }`}
+                  title="Rechercher dans la conversation"
+                  aria-label="Rechercher dans la conversation"
+                >
+                  <SearchIcon />
+                </button>
+
+                {currentRole === "admin" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void loadProfile(selectedConv.otherId);
+                      setShowConversationMenu(false);
+                    }}
+                    className="grid h-9 w-9 place-items-center rounded-xl transition text-slate-500 hover:bg-slate-100"
+                    title="Voir le profil"
+                    aria-label="Voir le profil"
+                  >
+                    <ProfileIcon />
                   </button>
                 )}
-                <button onClick={() => exportConversation('csv')} className={`text-xs font-bold px-2 py-2 rounded-lg transition ${dark ? 'bg-gray-700 hover:bg-gray-600 text-gray-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`} title="Exporter CSV">📥 CSV</button>
-                <button onClick={() => exportConversation('pdf')} className={`text-xs font-bold px-2 py-2 rounded-lg transition ${dark ? 'bg-gray-700 hover:bg-gray-600 text-gray-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`} title="Exporter PDF">📄 PDF</button>
-                {selectedConv.closed ? (
-                  <button onClick={() => reopenConversation(selectedConv.otherId)} className="text-xs font-bold bg-emerald-100 hover:bg-emerald-200 text-emerald-700 px-3 py-2 rounded-lg transition">🔓 Rouvrir</button>
-                ) : (
-                  <button onClick={() => closeConversation(selectedConv.otherId)} className="text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2 rounded-lg transition">🗄️ Fermer</button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowConversationMenu((previous) => !previous)
+                  }
+                  className={`grid h-9 w-9 place-items-center rounded-xl transition ${
+                    showConversationMenu
+                      ? "bg-slate-100 text-slate-800"
+                      : "text-slate-500 hover:bg-slate-100"
+                  }`}
+                  aria-label="Actions de la conversation"
+                  aria-expanded={showConversationMenu}
+                >
+                  <MoreIcon />
+                </button>
+
+                {showConversationMenu && (
+                  <div className="absolute right-0 top-11 z-30 w-56 overflow-hidden rounded-2xl border p-1.5 shadow-xl border-slate-200 bg-white">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void exportConversation("csv");
+                        setShowConversationMenu(false);
+                      }}
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs font-semibold transition text-slate-700 hover:bg-slate-50"
+                    >
+                      <DownloadIcon />
+                      Exporter en CSV
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void exportConversation("pdf");
+                        setShowConversationMenu(false);
+                      }}
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs font-semibold transition text-slate-700 hover:bg-slate-50"
+                    >
+                      <DocumentIcon />
+                      Exporter / imprimer
+                    </button>
+
+                    <div className="my-1 border-t border-slate-100" />
+
+                    {selectedConv.closed ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void reopenConversation(selectedConv.otherId);
+                          setShowConversationMenu(false);
+                        }}
+                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs font-bold transition text-emerald-700 hover:bg-emerald-50"
+                      >
+                        <UnlockIcon />
+                        Rouvrir la discussion
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfirmAction({
+                            kind: "closeConversation",
+                            otherId: selectedConv.otherId,
+                          });
+                          setShowConversationMenu(false);
+                        }}
+                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs font-bold transition text-rose-600 hover:bg-rose-50"
+                      >
+                        <ArchiveIcon />
+                        Fermer la discussion
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
-            </div>
+            </header>
 
-            {selectedConv.closed && (
-              <div className="bg-amber-50 dark:bg-amber-900/20 border-b border-amber-100 dark:border-amber-800 px-4 py-2 flex items-center justify-between">
-                <p className="text-xs font-bold text-amber-700 dark:text-amber-400">Cette discussion a été fermée.</p>
-                <button onClick={() => reopenConversation(selectedConv.otherId)} className="text-xs font-bold text-emerald-600 hover:text-emerald-800 transition">Rouvrir</button>
-              </div>
-            )}
+            {showMsgSearch && (
+              <div className="shrink-0 border-b px-3 py-3 sm:px-4 border-slate-200/80 bg-slate-50/70">
+                <div className="flex items-center gap-2">
+                  <label className="relative flex-1">
+                    <span className="sr-only">
+                      Rechercher dans la conversation
+                    </span>
+                    <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+                      <SearchIcon />
+                    </span>
+                    <input
+                      type="search"
+                      value={msgSearch}
+                      onChange={(event) =>
+                        void searchMessages(event.target.value)
+                      }
+                      placeholder="Rechercher un message…"
+                      autoFocus
+                      className="h-10 w-full rounded-xl border py-2 pl-10 pr-10 text-sm outline-none transition focus:ring-2 focus:ring-blue-500/30 border-slate-200 bg-white text-slate-900 placeholder:text-slate-400"
+                    />
+                    {searchingMessages && (
+                      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-blue-600">
+                        <SpinnerIcon />
+                      </span>
+                    )}
+                  </label>
 
-            {/* Messages */}
-            <div ref={messagesContainerRef} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} onTouchStart={swipeStart} onTouchMove={swipeMove} onTouchEnd={swipeEnd} className={`flex-1 overflow-y-auto p-4 space-y-3 transition-colors ${dragOver ? 'bg-blue-50 dark:bg-blue-900/20 ring-2 ring-inset ring-blue-300 dark:ring-blue-600' : (dark ? 'bg-gray-900/50' : 'bg-gradient-to-b from-slate-50/50 to-white')}`} style={{ transform: swipeOffset > 0 ? `translateX(${Math.min(swipeOffset * 0.3, 30)}px)` : swipeOffset < 0 ? `translateX(${Math.max(swipeOffset * 0.3, -30)}px)` : undefined }}>
-              {messages.length >= PAGE_SIZE && (
-                <button onClick={loadOlder} disabled={loadingOlder} className={`mx-auto block text-xs font-bold px-4 py-1.5 rounded-full transition ${dark ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
-                  {loadingOlder ? 'Chargement...' : `Charger plus ↑`}
-                </button>
-              )}
-              {filteredMessages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-slate-400 dark:text-gray-500">
-                  <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-gray-700 flex items-center justify-center text-3xl mb-3">💬</div>
-                  <p className="font-medium text-sm">Commencez la conversation</p>
-                  <p className="text-xs text-slate-300 dark:text-gray-600 mt-1">Envoyez votre premier message</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowMsgSearch(false);
+                      setMsgSearch("");
+                      setMsgSearchResults([]);
+                      messageSearchRequestRef.current += 1;
+                      setSearchingMessages(false);
+                    }}
+                    className="grid h-10 w-10 place-items-center rounded-xl text-slate-500 hover:bg-slate-100"
+                    aria-label="Fermer la recherche"
+                  >
+                    <CloseIcon />
+                  </button>
                 </div>
-              ) : (
-                filteredMessages.map(m => {
-                  const isMine = m.sender_id === currentUserId;
-                  const isExpired = m.ephemeral && m.expires_at && new Date(m.expires_at) < new Date();
-                  if (isExpired) return null;
 
-                  if (m.deleted) {
-                    return (
-                      <div key={m.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[70%] px-4 py-2.5 rounded-2xl text-sm italic ${dark ? 'bg-gray-700 text-gray-400' : 'bg-slate-100 text-slate-400'}`}>
-                          <p>🗑️ Message supprimé</p>
-                          <p className={`text-[10px] mt-1 ${isMine ? 'text-blue-200' : 'text-slate-400'}`}>
-                            {new Date(m.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  const replyMsg = m.reply_to ? messages.find(rm => rm.id === m.reply_to) : null;
-                  const reactionEntries = m.reactions ? Object.entries(m.reactions).filter(([, users]) => users.length > 0) : [];
-
-                  return (
-                    <div key={m.id} className={`group flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
-                      {/* Pinned indicator */}
-                      {m.pinned && (
-                        <div className={`text-[10px] font-bold mb-0.5 px-2 py-0.5 rounded-full ${dark ? 'bg-amber-900/30 text-amber-400' : 'bg-amber-100 text-amber-600'}`}>📌 Épinglé</div>
-                      )}
-
-                      {/* Reply-to preview */}
-                      {replyMsg && !replyMsg.deleted && (
-                        <div className={`text-[10px] px-3 py-1.5 rounded-t-xl border-b-0 max-w-[70%] truncate ${dark ? 'bg-gray-600 text-gray-300 border-l-2 border-l-blue-400' : 'bg-slate-100 text-slate-500 border-l-2 border-l-blue-400'}`}>
-                          ↩ {replyMsg.content.slice(0, 60)}
-                        </div>
-                      )}
-
-                      <div className={`max-w-[70%] px-4 py-2.5 rounded-2xl text-sm font-medium relative ${
-                        isMine
-                          ? 'bg-blue-600 text-white rounded-br-md'
-                          : (dark ? 'bg-gray-700 text-gray-100 border border-gray-600 rounded-bl-md' : 'bg-white text-slate-800 border border-slate-100 rounded-bl-md shadow-sm')
-                      }`}>
-                        {/* File attachment */}
-                        {m.file_url && (
-                          <div className="mb-2">
-                            {m.file_type?.startsWith('image/') ? (
-                              <img src={m.file_url} alt={m.file_name || 'Image'} className="rounded-lg max-w-full max-h-48 object-cover" />
-                            ) : m.file_type?.startsWith('audio/') ? (
-                              <audio controls src={m.file_url} className="max-w-full h-8" />
-                            ) : (
-                              <a href={m.file_url} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-2 p-2 rounded-lg ${isMine ? 'bg-blue-500' : (dark ? 'bg-gray-600' : 'bg-slate-100')}`}>
-                                <span className="text-lg">📎</span>
-                                <span className="text-xs font-bold truncate">{m.file_name}</span>
-                              </a>
-                            )}
-                          </div>
-                        )}
-
-                        {editingMsg?.id === m.id ? (
-                          <div className="flex gap-1">
-                            <input type="text" value={editContent} onChange={e => setEditContent(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditingMsg(null); }}
-                              className={`flex-1 rounded px-2 py-1 text-sm outline-none ${dark ? 'bg-gray-600 text-white' : 'bg-white text-slate-900'}`} autoFocus />
-                            <button onClick={saveEdit} className="text-xs font-bold text-emerald-400 hover:text-emerald-300">✓</button>
-                            <button onClick={() => setEditingMsg(null)} className="text-xs font-bold text-red-400 hover:text-red-300">✕</button>
-                          </div>
-                        ) : (
-                          <>
-                            {m.content && <p className="whitespace-pre-wrap">{m.content}</p>}
-                            <div className={`flex items-center justify-end gap-1 mt-1 ${isMine ? 'text-blue-200' : (dark ? 'text-gray-400' : 'text-slate-400')}`}>
-                              {m.ephemeral && <span className="text-[9px] mr-1 opacity-70">⏱️</span>}
-                              <p className="text-[10px]">{new Date(m.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
-                              {renderTicks(m)}
-                            </div>
-                          </>
-                        )}
-
-                        {/* Hover action buttons */}
-                        <div className="absolute -top-8 right-0 hidden group-hover:flex gap-1 z-10">
-                          <button onClick={() => copyMessage(m.content)} className="w-7 h-7 rounded-full bg-white dark:bg-gray-600 shadow flex items-center justify-center text-xs hover:bg-slate-100 dark:hover:bg-gray-500 transition" title="Copier">📋</button>
-                          {isFeatureEnabled('replyToMessage') && <button onClick={() => setReplyingTo(m)} className="w-7 h-7 rounded-full bg-white dark:bg-gray-600 shadow flex items-center justify-center text-xs hover:bg-slate-100 dark:hover:bg-gray-500 transition" title="Répondre">↩️</button>}
-                          {isFeatureEnabled('emojiPicker') && <button onClick={() => setShowEmoji(showEmoji === m.id ? false : m.id)} className="w-7 h-7 rounded-full bg-white dark:bg-gray-600 shadow flex items-center justify-center text-xs hover:bg-slate-100 dark:hover:bg-gray-500 transition" title="Réagir">😊</button>}
-                          {isFeatureEnabled('editableMessages') && isMine && <button onClick={() => startEdit(m)} className="w-7 h-7 rounded-full bg-white dark:bg-gray-600 shadow flex items-center justify-center text-xs hover:bg-slate-100 dark:hover:bg-gray-500 transition" title="Modifier">✏️</button>}
-                          {isFeatureEnabled('pinMessages') && isMine && <button onClick={() => pinMessage(m.id)} className={`w-7 h-7 rounded-full shadow flex items-center justify-center text-xs transition ${m.pinned ? 'bg-amber-100 text-amber-600 hover:bg-amber-200' : 'bg-white dark:bg-gray-600 hover:bg-slate-100 dark:hover:bg-gray-500'}`} title={m.pinned ? 'Désépingler' : 'Épingler'}>📌</button>}
-                        </div>
-
-                        {/* Emoji picker popup */}
-                        {showEmoji === m.id && (
-                          <div className={`absolute -top-12 right-0 flex gap-1 p-1.5 rounded-xl shadow-xl z-20 ${dark ? 'bg-gray-700 border border-gray-600' : 'bg-white border border-slate-200'}`}>
-                            {EMOJI_LIST.map(e => (
-                              <button key={e} onClick={() => addReaction(m.id, e)} className="w-7 h-7 rounded hover:bg-slate-100 dark:hover:bg-gray-600 flex items-center justify-center text-sm transition">{e}</button>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Delete button */}
-                        {(isMine || currentRole === 'admin') && (
-                          <button onClick={() => deleteMessage(m.id)} className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 text-white text-xs opacity-0 group-hover:opacity-100 transition flex items-center justify-center" title="Supprimer">✕</button>
-                        )}
-                      </div>
-
-                      {/* Reactions */}
-                      {reactionEntries.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-0.5 px-1">
-                          {reactionEntries.map(([emoji, users]) => (
-                            <button key={emoji} onClick={() => addReaction(m.id, emoji)}
-                              className={`text-xs px-1.5 py-0.5 rounded-full border transition ${users.includes(currentUserId) ? (dark ? 'bg-blue-900/40 border-blue-500 text-blue-300' : 'bg-blue-50 border-blue-300 text-blue-600') : (dark ? 'bg-gray-700 border-gray-600 text-gray-300' : 'bg-slate-50 border-slate-200 text-slate-600')}`}>
-                              {emoji} {users.length}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-              {typingText && (
-                <div className="flex items-center gap-2 px-2">
-                  <div className="flex gap-1">
-                    <span className={`w-2 h-2 rounded-full animate-bounce ${dark ? 'bg-gray-400' : 'bg-slate-400'}`} style={{ animationDelay: '0ms' }} />
-                    <span className={`w-2 h-2 rounded-full animate-bounce ${dark ? 'bg-gray-400' : 'bg-slate-400'}`} style={{ animationDelay: '150ms' }} />
-                    <span className={`w-2 h-2 rounded-full animate-bounce ${dark ? 'bg-gray-400' : 'bg-slate-400'}`} style={{ animationDelay: '300ms' }} />
-                  </div>
-                  <span className={`text-xs ${dark ? 'text-gray-400' : 'text-slate-400'}`}>{typingText} écrit...</span>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Ephemeral selector */}
-            {ephemeralMode !== null && (
-              <div className={`px-4 py-1.5 text-xs font-bold flex items-center gap-2 ${dark ? 'bg-purple-900/30 text-purple-300' : 'bg-purple-50 text-purple-600'}`}>
-                <span>⏱️ Message éphémère : {EPHEMERAL_OPTIONS.find(o => o.ms === ephemeralMode)?.label}</span>
-                <button onClick={() => setEphemeralMode(null)} className="ml-auto text-purple-400 hover:text-purple-600">✕</button>
-              </div>
-            )}
-
-            {/* Input */}
-            {!selectedConv.closed ? (
-              <div className={`p-4 border-t relative ${dark ? 'border-gray-700 bg-gray-800' : 'border-slate-100 bg-white'}`}>
-                {/* Mention search dropdown */}
-                {showMentions && mentionUsers.length > 0 && (
-                  <div className={`absolute bottom-full left-4 mb-1 w-64 rounded-xl shadow-xl border overflow-hidden z-20 ${dark ? 'bg-gray-700 border-gray-600' : 'bg-white border-slate-200'}`}>
-                    {mentionUsers.map(u => (
-                      <button key={u.id} onClick={() => insertMention(u)} className={`w-full text-left px-3 py-2 flex items-center gap-2 text-sm transition ${dark ? 'hover:bg-gray-600 text-gray-200' : 'hover:bg-slate-50 text-slate-800'}`}>
-                        <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${u.role === 'admin' ? 'bg-amber-100 text-amber-700' : u.role === 'entreprise' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>{u.nom.charAt(0)}</span>
-                        <span className="font-semibold">{u.nom}</span>
-                        <span className={`text-xs capitalize ${dark ? 'text-gray-400' : 'text-slate-400'}`}>{u.role}</span>
+                {msgSearchResults.length > 0 && (
+                  <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+                    {msgSearchResults.slice(0, 8).map((result) => (
+                      <button
+                        key={result.id}
+                        type="button"
+                        onClick={() => void revealSearchResult(result)}
+                        className="min-w-52 max-w-64 rounded-xl border px-3 py-2 text-left border-slate-200 bg-white hover:border-blue-200"
+                      >
+                        <p className="truncate text-xs font-bold">
+                          {messagePreview({ content: result.content })}
+                        </p>
+                        <p className="mt-1 text-[10px] text-slate-400">
+                          {new Date(result.created_at).toLocaleString("fr-FR")}
+                        </p>
                       </button>
                     ))}
                   </div>
                 )}
 
-                {/* Reply-to indicator */}
-                {replyingTo && (
-                  <div className={`mb-2 px-3 py-2 rounded-t-xl border-l-2 border-l-blue-400 flex items-center justify-between text-xs ${dark ? 'bg-gray-700 text-gray-300' : 'bg-slate-50 text-slate-500'}`}>
-                    <span className="truncate">↩ Réponse à {replyingTo.content.slice(0, 50)}</span>
-                    <button onClick={() => setReplyingTo(null)} className="ml-2 text-slate-400 hover:text-slate-600 dark:hover:text-gray-200 font-bold">✕</button>
-                  </div>
-                )}
-                <div className="flex gap-2 items-end">
-                  <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,.pdf,.doc,.docx,.txt,.csv,.xlsx" />
-                  <button onClick={() => fileInputRef.current?.click()} className={`p-2.5 rounded-xl transition ${dark ? 'bg-gray-700 hover:bg-gray-600 text-gray-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`} title="Joindre un fichier">
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
-                  </button>
-
-                  {/* Voice recording */}
-                  {isFeatureEnabled('voiceMessages') && (
-                    recording ? (
-                      <button onClick={() => { stopRecording(); sendAudio(); }} className="p-2.5 rounded-xl bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-300 transition animate-pulse" title="Arrêter et envoyer">
-                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
-                      </button>
-                    ) : (
-                      <button onClick={startRecording} className={`p-2.5 rounded-xl transition ${dark ? 'bg-gray-700 hover:bg-gray-600 text-gray-400' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`} title="Message vocal">
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-                      </button>
-                    )
+                {!searchingMessages &&
+                  msgSearch.trim().length >= 2 &&
+                  msgSearchResults.length === 0 && (
+                    <p className="mt-2 px-1 text-[11px] font-medium text-slate-400">
+                      Aucun message ne correspond à cette recherche.
+                    </p>
                   )}
+              </div>
+            )}
 
-                  <div className="relative">
-                    <button onClick={() => setEphemeralMode(ephemeralMode === null ? EPHEMERAL_OPTIONS[0].ms : EPHEMERAL_OPTIONS[(EPHEMERAL_OPTIONS.findIndex(o => o.ms === ephemeralMode) + 1) % EPHEMERAL_OPTIONS.length].ms)}
-                      className={`p-2.5 rounded-xl transition ${ephemeralMode !== null ? 'bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-300' : (dark ? 'bg-gray-700 hover:bg-gray-600 text-gray-400' : 'bg-slate-100 hover:bg-slate-200 text-slate-500')}`} title="Mode éphémère">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    </button>
+            {selectedConv.closed && (
+              <div className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-2.5 border-amber-100 bg-amber-50">
+                <div className="flex min-w-0 items-center gap-2">
+                  <ArchiveIcon />
+                  <p className="truncate text-xs font-semibold text-amber-800">
+                    Cette discussion est fermée. L&apos;envoi de nouveaux
+                    messages est désactivé.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void reopenConversation(selectedConv.otherId)}
+                  className="shrink-0 text-xs font-black text-emerald-700"
+                >
+                  Rouvrir
+                </button>
+              </div>
+            )}
+
+            <div
+              ref={messagesContainerRef}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onTouchStart={swipeStart}
+              onTouchMove={swipeMove}
+              onTouchEnd={swipeEnd}
+              aria-busy={loadingMessages}
+              aria-live="polite"
+              className={`relative min-h-0 flex-1 overflow-y-auto px-3 py-5 sm:px-5 lg:px-8 ${
+                dragOver
+                  ? "bg-blue-50 ring-2 ring-inset ring-blue-300"
+                  : "bg-[radial-gradient(circle_at_top,_#f8fbff_0,_#ffffff_55%)]"
+              }`}
+              style={{
+                transform:
+                  swipeOffset > 0
+                    ? `translateX(${Math.min(swipeOffset * 0.18, 18)}px)`
+                    : swipeOffset < 0
+                      ? `translateX(${Math.max(swipeOffset * 0.18, -18)}px)`
+                      : undefined,
+              }}
+            >
+              {dragOver && (
+                <div className="pointer-events-none absolute inset-4 z-20 grid place-items-center rounded-3xl border-2 border-dashed border-blue-400 bg-blue-50/90 text-center backdrop-blur">
+                  <div>
+                    <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-blue-600 text-white">
+                      <PaperclipIcon />
+                    </div>
+                    <p className="text-sm font-black text-blue-700">
+                      Déposez votre fichier ici
+                    </p>
+                    <p className="mt-1 text-xs text-blue-500">
+                      Taille maximale : 10 Mo
+                    </p>
                   </div>
+                </div>
+              )}
 
-                  <textarea
-                    ref={inputRef}
-                    value={newMessage}
-                    onChange={e => { setNewMessage(e.target.value); handleTyping(); const val = e.target.value; const atIdx = val.lastIndexOf('@'); if (atIdx >= 0 && atIdx === val.length - 1 || (atIdx >= 0 && !val.slice(atIdx).includes(' '))) { searchMentions(val.slice(atIdx + 1)); } else { setShowMentions(false); } }}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !showMentions) { e.preventDefault(); sendMessage(); } }}
-                    placeholder={editingMsg ? 'Modifier le message...' : replyingTo ? 'Répondre...' : 'Écrivez votre message...'}
-                    rows={1}
-                    className={`flex-1 rounded-xl border px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition resize-none ${dark ? 'bg-gray-700 border-gray-600 text-white' : 'border-slate-200'}`}
-                  />
-                  <button onClick={editingMsg ? saveEdit : sendMessage} disabled={(!newMessage.trim() && !editingMsg) || sending}
-                    className="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm hover:bg-blue-700 transition disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-blue-200"
-                    aria-label={editingMsg ? 'Modifier' : 'Envoyer'}>
-                    {sending ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" /> :
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>
-                    }
+              {!loadingMessages && hasMoreMessages && (
+                <div className="mb-5 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => void loadOlder()}
+                    disabled={loadingOlder}
+                    className="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[11px] font-bold shadow-sm transition disabled:opacity-60 border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                  >
+                    {loadingOlder ? <SpinnerIcon /> : <ChevronUpIcon />}
+                    {loadingOlder
+                      ? "Chargement…"
+                      : "Afficher les messages précédents"}
                   </button>
                 </div>
+              )}
+
+              {loadingMessages ? (
+                <MessageListSkeleton />
+              ) : filteredMessages.length === 0 ? (
+                <div className="flex h-full min-h-72 flex-col items-center justify-center px-6 text-center">
+                  <div className="mb-4 grid h-16 w-16 place-items-center rounded-3xl bg-white text-blue-600 shadow-sm ring-1 ring-slate-200">
+                    {msgSearch ? <SearchIcon /> : <MessageIcon large />}
+                  </div>
+                  <p className="text-base font-black text-slate-800">
+                    {msgSearch
+                      ? "Aucun message trouvé"
+                      : `Démarrez la conversation avec ${selectedConv.otherNom}`}
+                  </p>
+                  <p className="mt-1 max-w-sm text-sm leading-6 text-slate-500">
+                    {msgSearch
+                      ? "Modifiez votre recherche pour afficher d'autres résultats."
+                      : "Écrivez un premier message. Vos échanges apparaîtront ici en temps réel."}
+                  </p>
+                </div>
+              ) : (
+                filteredMessages.map((message, index) => {
+                  const isMine = message.sender_id === currentUserId;
+                  const isExpired =
+                    message.ephemeral &&
+                    message.expires_at &&
+                    new Date(message.expires_at) < new Date();
+
+                  if (isExpired) return null;
+
+                  const previous = filteredMessages[index - 1];
+                  const showDay =
+                    !previous ||
+                    !isSameDay(previous.created_at, message.created_at);
+
+                  const attachment = resolveMessageAttachment(message);
+                  const messageText = visibleMessageText(message, attachment);
+                  const isDownloadingAttachment = Boolean(
+                    attachment && downloadingAttachmentUrl === attachment.url,
+                  );
+
+                  return (
+                    <div key={message.id}>
+                      {showDay && (
+                        <DaySeparator
+                          label={formatDayLabel(message.created_at)}
+                        />
+                      )}
+
+                      <div
+                        id={`message-${message.id}`}
+                        className={`group flex flex-col rounded-2xl transition ${
+                          isMine ? "items-end" : "items-start"
+                        } ${
+                          highlightedMessageId === message.id
+                            ? "bg-blue-50/80 ring-2 ring-blue-200 ring-offset-2"
+                            : ""
+                        }`}
+                      >
+                        <div
+                          className={`relative max-w-[86%] rounded-[20px] px-3.5 py-2.5 text-sm leading-6 sm:max-w-[72%] lg:max-w-[66%] ${
+                            isMine
+                              ? "rounded-br-md bg-blue-600 text-white shadow-sm shadow-blue-600/10"
+                              : "rounded-bl-md border border-slate-200/80 bg-white text-slate-800 shadow-[0_4px_16px_rgba(15,23,42,0.04)]"
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveMessageActions((current) =>
+                                current === message.id ? null : message.id,
+                              );
+                            }}
+                            className={`absolute top-1 h-8 w-8 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm ${
+                              message.id < 0 ? "hidden" : "grid sm:hidden"
+                            } ${isMine ? "right-full mr-1" : "left-full ml-1"}`}
+                            aria-label="Actions du message"
+                            aria-expanded={activeMessageActions === message.id}
+                          >
+                            <MoreIcon />
+                          </button>
+
+                          {attachment && (
+                            <div className={messageText ? "mb-2" : ""}>
+                              {attachment.type.startsWith("image/") ? (
+                                <div className="group relative overflow-hidden rounded-xl">
+                                  <a
+                                    href={attachment.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="block"
+                                  >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={attachment.url}
+                                      alt={attachment.name || "Image envoyée"}
+                                      className="max-h-72 w-full object-cover transition group-hover:scale-[1.01]"
+                                    />
+                                  </a>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void downloadAttachment(attachment)
+                                    }
+                                    disabled={downloadingAttachmentUrl !== null}
+                                    className="absolute right-2 top-2 inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-950/75 px-2.5 text-xs font-bold text-white shadow-lg backdrop-blur transition hover:bg-slate-950 disabled:cursor-wait disabled:opacity-70"
+                                    aria-label={`Télécharger ${attachment.name}`}
+                                  >
+                                    {isDownloadingAttachment ? (
+                                      <SpinnerIcon />
+                                    ) : (
+                                      <DownloadIcon />
+                                    )}
+                                    <span className="hidden sm:inline">
+                                      Enregistrer
+                                    </span>
+                                  </button>
+                                </div>
+                              ) : attachment.type.startsWith("audio/") ? (
+                                <div
+                                  className={`rounded-xl p-2.5 ${
+                                    isMine
+                                      ? "bg-white/95 text-slate-800"
+                                      : "bg-slate-50 text-slate-800"
+                                  }`}
+                                >
+                                  <div className="mb-2 flex items-center justify-between gap-3">
+                                    <div className="flex min-w-0 items-center gap-2">
+                                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-blue-100 text-blue-700">
+                                        <MicIcon />
+                                      </span>
+                                      <span className="truncate text-xs font-bold">
+                                        Message vocal
+                                      </span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        void downloadAttachment(attachment)
+                                      }
+                                      disabled={
+                                        downloadingAttachmentUrl !== null
+                                      }
+                                      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1 text-[10px] font-bold text-blue-700 transition hover:bg-blue-100 disabled:cursor-wait disabled:opacity-60"
+                                      aria-label="Télécharger le message vocal"
+                                    >
+                                      {isDownloadingAttachment ? (
+                                        <SpinnerIcon />
+                                      ) : (
+                                        <DownloadIcon />
+                                      )}
+                                      Enregistrer
+                                    </button>
+                                  </div>
+                                  <audio
+                                    key={attachment.url}
+                                    controls
+                                    preload="metadata"
+                                    className="h-10 w-[270px] max-w-full"
+                                    onError={(e) => {
+                                      const err = (e.target as HTMLAudioElement).error;
+                                      console.error("[audio] Erreur lecture:", err?.code, err?.message, "URL:", attachment.url);
+                                    }}
+                                  >
+                                    <source src={attachment.url} type={attachment.type} />
+                                    Votre navigateur ne peut pas lire ce message
+                                    vocal.
+                                  </audio>
+                                </div>
+                              ) : (
+                                <div
+                                  className={`flex items-center gap-3 rounded-xl border p-2.5 transition ${
+                                    isMine
+                                      ? "border-white/20 bg-white/10"
+                                      : "border-slate-200 bg-slate-50"
+                                  }`}
+                                >
+                                  <a
+                                    href={attachment.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex min-w-0 flex-1 items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                                    aria-label={`Ouvrir ${attachment.name}`}
+                                  >
+                                    <span
+                                      className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${
+                                        isMine ? "bg-white/15" : "bg-white"
+                                      }`}
+                                    >
+                                      <DocumentIcon />
+                                    </span>
+                                    <span className="min-w-0">
+                                      <span className="block truncate text-xs font-bold">
+                                        {attachment.name || "Fichier"}
+                                      </span>
+                                      <span className="block text-[10px] opacity-70">
+                                        Cliquer pour ouvrir
+                                      </span>
+                                    </span>
+                                  </a>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void downloadAttachment(attachment)
+                                    }
+                                    disabled={downloadingAttachmentUrl !== null}
+                                    className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[10px] font-bold transition disabled:cursor-wait disabled:opacity-60 ${
+                                      isMine
+                                        ? "bg-white/15 text-white hover:bg-white/25"
+                                        : "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200 hover:bg-blue-50"
+                                    }`}
+                                    aria-label={`Télécharger ${attachment.name}`}
+                                  >
+                                    {isDownloadingAttachment ? (
+                                      <SpinnerIcon />
+                                    ) : (
+                                      <DownloadIcon />
+                                    )}
+                                    <span className="hidden sm:inline">
+                                      Enregistrer
+                                    </span>
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {editingMsg?.id === message.id ? (
+                            <div className="min-w-[220px]">
+                              <input
+                                type="text"
+                                value={editContent}
+                                maxLength={MAX_MESSAGE_LENGTH}
+                                onChange={(event) =>
+                                  setEditContent(event.target.value)
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") void saveEdit();
+                                  if (event.key === "Escape") {
+                                    setEditingMsg(null);
+                                    setEditContent("");
+                                  }
+                                }}
+                                className="w-full rounded-xl border px-3 py-2 text-sm outline-none border-blue-300 bg-white text-slate-900"
+                                autoFocus
+                              />
+                              <div className="mt-2 flex justify-end gap-2 text-[10px] font-bold">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingMsg(null);
+                                    setEditContent("");
+                                  }}
+                                  className="opacity-70 hover:opacity-100"
+                                >
+                                  Annuler
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void saveEdit()}
+                                  disabled={!editContent.trim()}
+                                  className={`${isMine ? "text-white" : "text-blue-600"} disabled:cursor-not-allowed disabled:opacity-40`}
+                                >
+                                  Enregistrer
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              {messageText && (
+                                <p className="whitespace-pre-wrap break-words">
+                                  {messageText}
+                                </p>
+                              )}
+
+                              <div
+                                className={`mt-1 flex items-center justify-end gap-1 text-[9px] font-medium ${
+                                  isMine ? "text-blue-100" : "text-slate-400"
+                                }`}
+                              >
+                                {message.ephemeral && (
+                                  <span
+                                    className="mr-0.5 inline-flex"
+                                    title="Message éphémère"
+                                  >
+                                    <ClockIcon />
+                                  </span>
+                                )}
+                                <span>
+                                  {new Date(
+                                    message.created_at,
+                                  ).toLocaleTimeString("fr-FR", {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </span>
+                                {renderTicks(message)}
+                              </div>
+                            </>
+                          )}
+
+                          <div
+                            className={`absolute ${
+                              isMine ? "right-0" : "left-0"
+                            } -top-10 z-10 items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-lg ${
+                              message.id < 0
+                                ? "hidden"
+                                : activeMessageActions === message.id
+                                  ? "flex"
+                                  : "hidden sm:group-hover:flex sm:group-focus-within:flex"
+                            }`}
+                          >
+                            <MessageAction
+                              title="Copier"
+                              onClick={() => {
+                                void copyMessage(message.content);
+                                setActiveMessageActions(null);
+                              }}
+                            >
+                              <CopyIcon />
+                            </MessageAction>
+
+                            {isFeatureEnabled("replyToMessage") && (
+                              <MessageAction
+                                title="Répondre"
+                                onClick={() => {
+                                  setReplyingTo(message);
+                                  setActiveMessageActions(null);
+                                  inputRef.current?.focus();
+                                }}
+                              >
+                                <ReplyIcon />
+                              </MessageAction>
+                            )}
+
+                            {isFeatureEnabled("editableMessages") &&
+                              isMine &&
+                              !attachment && (
+                                <MessageAction
+                                  title="Modifier"
+                                  onClick={() => {
+                                    startEdit(message);
+                                    setActiveMessageActions(null);
+                                  }}
+                                >
+                                  <EditIcon />
+                                </MessageAction>
+                              )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+
+              {typingText && (
+                <div className="mt-4 flex items-center gap-2 px-1">
+                  <div className="flex items-center gap-1 rounded-2xl px-3 py-2 bg-slate-100">
+                    {[0, 150, 300].map((delay) => (
+                      <span
+                        key={delay}
+                        className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400"
+                        style={{ animationDelay: `${delay}ms` }}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-[11px] font-medium text-slate-400">
+                    {typingText} écrit…
+                  </span>
+                </div>
+              )}
+
+              <div ref={messagesEndRef} className="h-1" />
+            </div>
+
+            {!selectedConv.closed && canContactRole(selectedConv.otherRole) ? (
+              <div className="shrink-0 border-t px-3 py-3 sm:px-4 border-slate-200/80 bg-white">
+                {ephemeralMode !== null && (
+                  <div className="mb-2 flex items-center gap-2 rounded-xl px-3 py-2 text-[11px] font-semibold bg-purple-50 text-purple-700">
+                    <ClockIcon />
+                    Message éphémère ·{" "}
+                    {
+                      EPHEMERAL_OPTIONS.find(
+                        (option) => option.ms === ephemeralMode,
+                      )?.label
+                    }
+                    <button
+                      type="button"
+                      onClick={() => setEphemeralMode(null)}
+                      className="ml-auto opacity-70 transition hover:opacity-100"
+                      aria-label="Désactiver le mode éphémère"
+                    >
+                      <CloseIcon />
+                    </button>
+                  </div>
+                )}
+
+                {replyingTo && (
+                  <div className="mb-2 flex items-center gap-3 rounded-xl border-l-2 border-blue-500 px-3 py-2 bg-slate-50 text-slate-600">
+                    <ReplyIcon />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-bold text-blue-600">
+                        Réponse
+                      </p>
+                      <p className="truncate text-xs">
+                        {messagePreview(replyingTo)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setReplyingTo(null)}
+                      className="opacity-60 hover:opacity-100"
+                      aria-label="Annuler la réponse"
+                    >
+                      <CloseIcon />
+                    </button>
+                  </div>
+                )}
+
+                {showMentions && mentionUsers.length > 0 && (
+                  <div className="absolute bottom-[78px] left-4 z-30 w-72 overflow-hidden rounded-2xl border p-1.5 shadow-xl border-slate-200 bg-white">
+                    {mentionUsers.map((user) => (
+                      <button
+                        key={user.id}
+                        type="button"
+                        onClick={() => insertMention(user)}
+                        className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left transition hover:bg-slate-50"
+                      >
+                        <ChatAvatar
+                          name={user.nom}
+                          role={user.role}
+                          size="xs"
+                        />
+                        <span className="min-w-0 flex-1 truncate text-xs font-bold">
+                          {user.nom}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {roleLabel(user.role)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-end gap-2 rounded-2xl border p-2 transition focus-within:ring-2 focus-within:ring-blue-500/20 border-slate-200 bg-slate-50/70 focus-within:border-blue-400 focus-within:bg-white">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    accept="image/*,.pdf,.doc,.docx,.txt,.csv,.xlsx"
+                  />
+
+                  <ComposerTool
+                    title={
+                      uploadingFile ? "Envoi du fichier…" : "Joindre un fichier"
+                    }
+                    onClick={() => fileInputRef.current?.click()}
+                    active={uploadingFile}
+                    disabled={uploadingFile}
+                  >
+                    {uploadingFile ? <SpinnerIcon /> : <PaperclipIcon />}
+                  </ComposerTool>
+
+                  {isFeatureEnabled("voiceMessages") &&
+                    (recording ? (
+                      <>
+                        <ComposerTool
+                          title="Annuler l'enregistrement"
+                          onClick={cancelRecording}
+                          active={false}
+                        >
+                          <CloseIcon />
+                        </ComposerTool>
+                        <ComposerTool
+                          title="Arrêter et envoyer"
+                          onClick={stopRecording}
+                          active
+                          danger
+                        >
+                          <StopIcon />
+                        </ComposerTool>
+                      </>
+                    ) : (
+                      <ComposerTool
+                        title="Message vocal"
+                        onClick={() => void startRecording()}
+                        active={false}
+                      >
+                        <MicIcon />
+                      </ComposerTool>
+                    ))}
+
+                  <ComposerTool
+                    title="Message éphémère"
+                    onClick={() =>
+                      setEphemeralMode((current) => {
+                        if (current === null) return EPHEMERAL_OPTIONS[0].ms;
+                        const index = EPHEMERAL_OPTIONS.findIndex(
+                          (option) => option.ms === current,
+                        );
+                        return EPHEMERAL_OPTIONS[
+                          (index + 1) % EPHEMERAL_OPTIONS.length
+                        ].ms;
+                      })
+                    }
+                    active={ephemeralMode !== null}
+                  >
+                    <ClockIcon />
+                  </ComposerTool>
+
+                  <div className="min-w-0 flex-1 px-1">
+                    {recording ? (
+                      <div
+                        className="flex min-h-10 items-center gap-2 px-1 text-xs font-semibold text-rose-600"
+                        role="status"
+                      >
+                        <span className="relative flex h-2.5 w-2.5">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-60" />
+                          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-600" />
+                        </span>
+                        Enregistrement en cours…
+                      </div>
+                    ) : (
+                      <textarea
+                        ref={inputRef}
+                        value={newMessage}
+                        maxLength={MAX_MESSAGE_LENGTH}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setNewMessage(value);
+                          handleTyping();
+
+                          event.target.style.height = "0px";
+                          event.target.style.height = `${Math.min(
+                            event.target.scrollHeight,
+                            120,
+                          )}px`;
+
+                          const atIndex = value.lastIndexOf("@");
+                          const mentionPart =
+                            atIndex >= 0 ? value.slice(atIndex + 1) : "";
+
+                          if (
+                            atIndex >= 0 &&
+                            !mentionPart.includes(" ") &&
+                            mentionPart.length <= 40
+                          ) {
+                            void searchMentions(mentionPart);
+                          } else {
+                            setShowMentions(false);
+                          }
+                        }}
+                        onKeyDown={(event) => {
+                          if (
+                            event.key === "Enter" &&
+                            !event.shiftKey &&
+                            !showMentions &&
+                            !event.nativeEvent.isComposing
+                          ) {
+                            event.preventDefault();
+                            void sendMessage();
+                          }
+                        }}
+                        placeholder={
+                          replyingTo
+                            ? "Écrire votre réponse…"
+                            : "Écrire un message…"
+                        }
+                        rows={1}
+                        className="max-h-[120px] min-h-[40px] w-full resize-none bg-transparent py-2 text-sm leading-6 outline-none text-slate-900 placeholder:text-slate-400"
+                        aria-label="Message"
+                      />
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => void sendMessage()}
+                    disabled={!newMessage.trim() || sending || recording}
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-600 text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    aria-label="Envoyer"
+                  >
+                    {sending ? <SpinnerIcon /> : <SendIcon />}
+                  </button>
+                </div>
+
+                <div className="mt-2 flex items-center justify-between px-1 text-[10px] text-slate-400">
+                  <span className="hidden sm:inline">
+                    Entrée pour envoyer · Maj + Entrée pour aller à la ligne
+                  </span>
+                  <span className="ml-auto">
+                    {newMessage.length}/{MAX_MESSAGE_LENGTH}
+                  </span>
+                </div>
+              </div>
+            ) : selectedConv.closed ? (
+              <div className="shrink-0 border-t p-4 text-center border-slate-200/80 bg-slate-50">
+                <p className="text-xs font-medium text-slate-500">
+                  Discussion fermée — rouvrez-la pour envoyer un nouveau
+                  message.
+                </p>
               </div>
             ) : (
-              <div className={`p-4 border-t text-center ${dark ? 'border-gray-700 bg-gray-800' : 'border-slate-100 bg-slate-50'}`}>
-                <p className={`text-xs font-medium ${dark ? 'text-gray-400' : 'text-slate-400'}`}>Discussion fermée</p>
+              <div className="shrink-0 border-t border-amber-100 bg-amber-50 p-4 text-center">
+                <p className="text-xs font-semibold text-amber-800">
+                  Votre profil peut uniquement démarrer une discussion avec un
+                  administrateur.
+                </p>
               </div>
             )}
           </>
         ) : (
-          <div className={`flex-1 flex items-center justify-center ${dark ? 'bg-gray-800' : 'bg-gradient-to-b from-slate-50/30 to-white'}`}>
-            <div className="text-center">
-              <div className={`w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-4 ${dark ? 'bg-gray-700' : 'bg-slate-100'}`}>💬</div>
-              <p className={`font-bold text-lg tracking-tight ${dark ? 'text-gray-300' : 'text-slate-500'}`}>
-                {currentRole === 'admin' ? 'Sélectionnez une conversation' : 'Vos discussions'}
-              </p>
-              <p className={`text-sm mt-1 ${dark ? 'text-gray-500' : 'text-slate-400'}`}>
-                {currentRole === 'admin' ? 'Choisissez un utilisateur ou démarrez une nouvelle discussion' : 'Contactez l\'administration pour toute question'}
+          <div className="flex flex-1 items-center justify-center px-6 bg-[radial-gradient(circle_at_center,_#f8fbff,_#ffffff_65%)]">
+            <div className="max-w-md text-center">
+              <div className="mx-auto mb-5 grid h-20 w-20 place-items-center rounded-[28px] bg-white text-blue-600 shadow-[0_16px_40px_rgba(37,99,235,0.10)] ring-1 ring-blue-100">
+                <MessageIcon large />
+              </div>
+              <h3 className="text-xl font-black tracking-tight text-slate-900">
+                Votre centre de messages
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-slate-500">
+                Sélectionnez une conversation dans la colonne de gauche ou
+                démarrez-en une nouvelle.
               </p>
             </div>
           </div>
         )}
-      </div>
+      </section>
 
-      {/* Profile Drawer */}
       {showProfile && activeProfile && (
-        <div className={`w-80 border-l flex flex-col p-6 shadow-xl ${dark ? 'border-gray-700 bg-gray-800' : 'border-slate-200 bg-white'}`}>
-          <div className={`flex justify-between items-center mb-6 border-b pb-4 ${dark ? 'border-gray-700' : 'border-slate-100'}`}>
-            <h3 className={`font-black text-base ${dark ? 'text-white' : 'text-slate-900'}`}>Coordonnées</h3>
-            <button onClick={() => setShowProfile(false)} className={`${dark ? 'text-gray-400 hover:text-gray-200' : 'text-slate-400 hover:text-slate-600'} font-bold p-1`}>✕</button>
-          </div>
-          <div className="flex flex-col items-center text-center mb-6">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={activeProfile.avatar_url || '/avatar-placeholder.png'} alt={activeProfile.nom} width={72} height={72} className="rounded-full object-cover w-18 h-18 border-2 border-slate-100 dark:border-gray-600 shadow-sm mb-3" />
-            <h4 className={`font-bold text-lg ${dark ? 'text-white' : 'text-slate-900'}`}>{activeProfile.nom}</h4>
-            <span className="inline-block px-3 py-1 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-bold uppercase rounded-full mt-1">{activeProfile.role}</span>
-          </div>
-          <div className="space-y-4 text-sm flex-1">
-            <div className={`p-3 rounded-xl border ${dark ? 'bg-gray-700 border-gray-600' : 'bg-slate-50 border-slate-100'}`}>
-              <span className={`block text-xs font-bold uppercase tracking-wider ${dark ? 'text-gray-400' : 'text-slate-400'}`}>Email</span>
-              <span className={`font-semibold break-all ${dark ? 'text-gray-200' : 'text-slate-800'}`}>{activeProfile.email || 'Non renseigné'}</span>
+        <>
+          <button
+            type="button"
+            className="absolute inset-0 z-30 bg-slate-950/20 backdrop-blur-[1px]"
+            onClick={() => setShowProfile(false)}
+            aria-label="Fermer le profil"
+          />
+          <aside
+            className="absolute inset-y-0 right-0 z-40 flex w-full max-w-sm flex-col border-l shadow-2xl sm:w-[360px] border-slate-200 bg-white"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="contact-profile-title"
+          >
+            <div className="flex items-center justify-between border-b px-5 py-4 border-slate-200">
+              <div>
+                <p id="contact-profile-title" className="text-sm font-black">
+                  Informations du contact
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  {profileLoading
+                    ? "Chargement des coordonnées…"
+                    : "Coordonnées du contact"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowProfile(false)}
+                className="grid h-9 w-9 place-items-center rounded-xl text-slate-500 hover:bg-slate-100"
+                aria-label="Fermer"
+              >
+                <CloseIcon />
+              </button>
             </div>
-            <div className={`p-3 rounded-xl border ${dark ? 'bg-gray-700 border-gray-600' : 'bg-slate-50 border-slate-100'}`}>
-              <span className={`block text-xs font-bold uppercase tracking-wider ${dark ? 'text-gray-400' : 'text-slate-400'}`}>Téléphone</span>
-              <span className={`font-semibold ${dark ? 'text-gray-200' : 'text-slate-800'}`}>{activeProfile.telephone || 'Non renseigné'}</span>
+
+            <div className="flex-1 overflow-y-auto p-5">
+              <div className="flex flex-col items-center text-center">
+                <ChatAvatar
+                  name={activeProfile.nom}
+                  role={activeProfile.role}
+                  size="xl"
+                />
+                <h4 className="mt-4 text-lg font-black text-slate-950">
+                  {activeProfile.nom}
+                </h4>
+                <span className="mt-2 rounded-full px-3 py-1 text-[10px] font-bold bg-blue-50 text-blue-700">
+                  {roleLabel(activeProfile.role)}
+                </span>
+              </div>
+
+              <div className="mt-8 space-y-3">
+                {profileLoading ? (
+                  Array.from({ length: 3 }).map((_, index) => (
+                    <div
+                      key={index}
+                      className="h-[66px] animate-pulse rounded-2xl border border-slate-100 bg-slate-50"
+                    />
+                  ))
+                ) : (
+                  <>
+                    <ProfileField
+                      label="Adresse e-mail"
+                      value={activeProfile.email || "Non renseignée"}
+                    />
+                    <ProfileField
+                      label="Téléphone"
+                      value={activeProfile.telephone || "Non renseigné"}
+                    />
+                    <ProfileField
+                      label="Rôle"
+                      value={roleLabel(activeProfile.role)}
+                    />
+                  </>
+                )}
+              </div>
             </div>
-            <div className={`p-3 rounded-xl border ${dark ? 'bg-gray-700 border-gray-600' : 'bg-slate-50 border-slate-100'}`}>
-              <span className={`block text-xs font-bold uppercase tracking-wider ${dark ? 'text-gray-400' : 'text-slate-400'}`}>Dernière activité</span>
-              <span className={`font-semibold ${dark ? 'text-gray-200' : 'text-slate-800'}`}>{getStatusInfo(activeProfile.last_seen).text}</span>
+          </aside>
+        </>
+      )}
+
+      {confirmAction && (
+        <>
+          <button
+            type="button"
+            className="absolute inset-0 z-50 bg-slate-950/35 backdrop-blur-[2px]"
+            onClick={() => {
+              if (!confirmingAction) setConfirmAction(null);
+            }}
+            aria-label="Annuler"
+          />
+          <div
+            className="absolute left-1/2 top-1/2 z-[60] w-[calc(100%_-_2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-6"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="confirm-action-title"
+            aria-describedby="confirm-action-description"
+          >
+            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-rose-50 text-rose-600">
+              <AlertTriangleIcon />
+            </div>
+            <h3
+              id="confirm-action-title"
+              className="mt-4 text-base font-black text-slate-950"
+            >
+              Fermer cette discussion ?
+            </h3>
+            <p
+              id="confirm-action-description"
+              className="mt-2 text-sm leading-6 text-slate-500"
+            >
+              Il ne sera plus possible d&apos;envoyer de nouveaux messages tant que
+              la discussion ne sera pas rouverte.
+            </p>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmAction(null)}
+                disabled={confirmingAction}
+                className="h-10 rounded-xl border border-slate-200 px-4 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmPendingAction()}
+                disabled={confirmingAction}
+                className="inline-flex h-10 items-center gap-2 rounded-xl bg-rose-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60"
+              >
+                {confirmingAction && <SpinnerIcon />}
+                Fermer
+              </button>
             </div>
           </div>
-        </div>
+        </>
       )}
     </div>
+  );
+}
+
+function ChatLoadError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="flex h-full min-h-[560px] w-full items-center justify-center rounded-[28px] border border-slate-200 bg-white px-6 text-center shadow-sm">
+      <div className="max-w-sm">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-rose-50 text-rose-600">
+          <AlertTriangleIcon />
+        </div>
+        <h3 className="mt-4 text-lg font-black tracking-tight text-slate-950">
+          La messagerie est indisponible
+        </h3>
+        <p className="mt-2 text-sm leading-6 text-slate-500">
+          Vérifiez votre connexion, puis réessayez. Aucun message n&apos;a été
+          perdu.
+        </p>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-5 inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+        >
+          <RefreshIcon />
+          Réessayer
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MessageListSkeleton() {
+  return (
+    <div
+      className="mx-auto flex w-full max-w-4xl flex-col gap-4 py-3"
+      aria-label="Chargement des messages"
+    >
+      {[42, 64, 48, 72, 38].map((width, index) => (
+        <div
+          key={`${width}-${index}`}
+          className={`flex ${index % 2 === 0 ? "justify-start" : "justify-end"}`}
+        >
+          <div
+            className="h-14 animate-pulse rounded-[20px] bg-slate-100"
+            style={{ width: `${width}%` }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ChatWindowSkeleton() {
+  return (
+    <div className="flex h-full min-h-[560px] w-full overflow-hidden bg-white md:rounded-[28px] md:border md:border-slate-200/80 md:shadow-[0_24px_70px_rgba(15,23,42,0.08)]">
+      <div className="w-full shrink-0 border-r border-slate-200 bg-slate-50/60 p-4 md:w-[360px]">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="h-4 w-28 animate-pulse rounded bg-slate-200" />
+            <div className="mt-2 h-3 w-20 animate-pulse rounded bg-slate-100" />
+          </div>
+          <div className="h-10 w-24 animate-pulse rounded-xl bg-slate-200" />
+        </div>
+        <div className="mt-4 h-10 animate-pulse rounded-xl bg-slate-200/80" />
+        <div className="mt-4 space-y-2">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div
+              key={index}
+              className="flex items-center gap-3 rounded-2xl bg-white/70 p-3"
+            >
+              <div className="h-11 w-11 animate-pulse rounded-full bg-slate-200" />
+              <div className="min-w-0 flex-1">
+                <div className="h-3 w-2/5 animate-pulse rounded bg-slate-200" />
+                <div className="mt-2 h-3 w-4/5 animate-pulse rounded bg-slate-100" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="hidden flex-1 items-center justify-center p-6 md:flex">
+        <SkeletonChat />
+      </div>
+    </div>
+  );
+}
+
+function ChatAvatar({
+  name,
+  role,
+  src,
+  size = "md",
+}: {
+  name: string;
+  role: string;
+  src?: string | null;
+  size?: "xs" | "sm" | "md" | "xl";
+}) {
+  const sizes = {
+    xs: "h-8 w-8 text-[11px]",
+    sm: "h-10 w-10 text-xs",
+    md: "h-11 w-11 text-sm",
+    xl: "h-20 w-20 text-xl",
+  };
+
+  const palette =
+    role === "admin"
+      ? "bg-gradient-to-br from-amber-100 to-orange-100 text-amber-800"
+      : role === "entreprise"
+        ? "bg-gradient-to-br from-emerald-100 to-teal-100 text-emerald-800"
+        : "bg-gradient-to-br from-blue-100 to-indigo-100 text-blue-800";
+
+  if (src) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={name}
+        className={`${sizes[size]} rounded-full object-cover ring-1 ring-black/5`}
+      />
+    );
+  }
+
+  return (
+    <span
+      className={`${sizes[size]} ${palette} grid shrink-0 select-none place-items-center rounded-full font-black uppercase tracking-tight ring-1 ring-black/5`}
+      aria-label={name}
+    >
+      {getInitials(name)}
+    </span>
+  );
+}
+
+function DaySeparator({ label }: { label: string }) {
+  return (
+    <div className="my-5 flex items-center gap-3">
+      <span className="h-px flex-1 bg-slate-100" />
+      <span className="rounded-full border px-3 py-1 text-[9px] font-bold uppercase tracking-[0.08em] border-slate-200 bg-white text-slate-400">
+        {label}
+      </span>
+      <span className="h-px flex-1 bg-slate-100" />
+    </div>
+  );
+}
+
+function ProfileField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border p-3.5 border-slate-200 bg-slate-50/70">
+      <p className="text-[9px] font-black uppercase tracking-[0.14em] text-slate-400">
+        {label}
+      </p>
+      <p className="mt-1 break-words text-sm font-semibold text-slate-800">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function MessageAction({
+  title,
+  onClick,
+  danger = false,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  danger?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`grid h-7 w-7 place-items-center rounded-lg transition ${
+        danger
+          ? "text-rose-500 hover:bg-rose-50"
+          : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+      }`}
+      title={title}
+      aria-label={title}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ComposerTool({
+  title,
+  onClick,
+  active,
+  danger = false,
+  disabled = false,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  active: boolean;
+  danger?: boolean;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl transition disabled:cursor-wait disabled:opacity-60 ${
+        danger
+          ? "bg-rose-50 text-rose-600"
+          : active
+            ? "bg-purple-50 text-purple-700"
+            : "text-slate-500 hover:bg-white hover:text-slate-700"
+      }`}
+      title={title}
+      aria-label={title}
+    >
+      {children}
+    </button>
+  );
+}
+
+type IconProps = { large?: boolean };
+
+function Icon({
+  children,
+  large = false,
+}: IconProps & { children: ReactNode }) {
+  return (
+    <svg
+      className={large ? "h-8 w-8" : "h-4 w-4"}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.9}
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <Icon>
+      <circle cx="11" cy="11" r="7" />
+      <path strokeLinecap="round" d="m20 20-3.5-3.5" />
+    </Icon>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <Icon>
+      <path strokeLinecap="round" d="M12 5v14M5 12h14" />
+    </Icon>
+  );
+}
+
+function MessageIcon({ large = false }: IconProps) {
+  return (
+    <Icon large={large}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M21 12a8 8 0 0 1-8 8H7l-4 2 1.4-4A8 8 0 1 1 21 12Z"
+      />
+      <path strokeLinecap="round" d="M8 10h8M8 14h5" />
+    </Icon>
+  );
+}
+
+function ArchiveIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M4 7h16M6 7v12h12V7M9 11h6"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M5 4h14l1 3H4l1-3Z"
+      />
+    </Icon>
+  );
+}
+
+function ShieldIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 3 19 6v5c0 4.6-2.8 8.1-7 10-4.2-1.9-7-5.4-7-10V6l7-3Z"
+      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="m9 12 2 2 4-4" />
+    </Icon>
+  );
+}
+
+function AlertTriangleIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 4 21 20H3L12 4Z"
+      />
+      <path strokeLinecap="round" d="M12 9v5M12 17.5h.01" />
+    </Icon>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M20 7v5h-5M4 17v-5h5"
+      />
+      <path
+        strokeLinecap="round"
+        d="M18.2 10A7 7 0 0 0 6.1 7.4L4 10M5.8 14A7 7 0 0 0 17.9 16.6L20 14"
+      />
+    </Icon>
+  );
+}
+
+function ProfileIcon() {
+  return (
+    <Icon>
+      <circle cx="12" cy="8" r="3" />
+      <path strokeLinecap="round" d="M5.5 19c.8-3.4 3-5 6.5-5s5.7 1.6 6.5 5" />
+    </Icon>
+  );
+}
+
+function MoreIcon() {
+  return (
+    <Icon>
+      <circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <Icon>
+      <path strokeLinecap="round" d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14" />
+    </Icon>
+  );
+}
+
+function DocumentIcon() {
+  return (
+    <Icon>
+      <path strokeLinejoin="round" d="M7 3h7l4 4v14H7zM14 3v5h4" />
+      <path strokeLinecap="round" d="M10 13h5M10 17h5" />
+    </Icon>
+  );
+}
+
+function UnlockIcon() {
+  return (
+    <Icon>
+      <rect x="5" y="10" width="14" height="10" rx="2" />
+      <path strokeLinecap="round" d="M9 10V7a3 3 0 0 1 5.4-1.8" />
+    </Icon>
+  );
+}
+
+function BackIcon() {
+  return (
+    <Icon>
+      <path strokeLinecap="round" strokeLinejoin="round" d="m15 18-6-6 6-6" />
+    </Icon>
+  );
+}
+
+function ChevronRightIcon() {
+  return (
+    <Icon>
+      <path strokeLinecap="round" strokeLinejoin="round" d="m9 6 6 6-6 6" />
+    </Icon>
+  );
+}
+
+function ChevronUpIcon() {
+  return (
+    <Icon>
+      <path strokeLinecap="round" strokeLinejoin="round" d="m6 15 6-6 6 6" />
+    </Icon>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <Icon>
+      <path strokeLinecap="round" d="M6 6l12 12M18 6 6 18" />
+    </Icon>
+  );
+}
+
+function PaperclipIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="m15.5 7-6.7 6.7a2.5 2.5 0 0 0 3.5 3.6l6.3-6.4a4.5 4.5 0 0 0-6.4-6.3L5.8 11a6.5 6.5 0 0 0 9.2 9.2l5.5-5.5"
+      />
+    </Icon>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <Icon>
+      <circle cx="12" cy="12" r="9" />
+      <path strokeLinecap="round" d="M12 7v5l3 2" />
+    </Icon>
+  );
+}
+
+function MicIcon() {
+  return (
+    <Icon>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path strokeLinecap="round" d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" />
+    </Icon>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M4 4 21 12 4 20l3-8-3-8Zm3 8h7"
+      />
+    </Icon>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <span
+      className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+      aria-hidden="true"
+    />
+  );
+}
+
+function PinIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="m9 4 6 6M8 9l7-5 5 5-5 7M12 13l-8 8"
+      />
+    </Icon>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <Icon>
+      <rect x="8" y="8" width="11" height="11" rx="2" />
+      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+    </Icon>
+  );
+}
+
+function ReplyIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="m10 8-5 4 5 4v-3h4c3 0 5 1.5 6 4-.2-5.5-2.7-8-7-8h-3V8Z"
+      />
+    </Icon>
+  );
+}
+
+function SmileIcon() {
+  return (
+    <Icon>
+      <circle cx="12" cy="12" r="9" />
+      <path
+        strokeLinecap="round"
+        d="M8.5 10h.01M15.5 10h.01M8.5 14c1 1.4 2.2 2 3.5 2s2.5-.6 3.5-2"
+      />
+    </Icon>
+  );
+}
+
+function EditIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="m4 20 4.5-1 9.8-9.8-3.5-3.5L5 15.5 4 20ZM13.8 6.7l3.5 3.5"
+      />
+    </Icon>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        d="M5 7h14M9 7V4h6v3M8 10v7M12 10v7M16 10v7M7 7l1 13h8l1-13"
+      />
+    </Icon>
   );
 }

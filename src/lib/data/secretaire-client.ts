@@ -10,7 +10,7 @@ function getSupabase() {
 }
 
 export type SecretaireDashboardData = {
-  profil: { nom: string; avatar_url?: string } | null;
+  profil: { nom: string } | null;
   missions: Mission[];
   candidatures: Candidature[];
   profilSecretaire: SecretaireProfil | null;

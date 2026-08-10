@@ -15,7 +15,7 @@ export type ActionError = {
 };
 
 export type EntrepriseDashboardData = {
-  profil: { nom: string; avatar_url?: string } | null;
+  profil: { nom: string } | null;
   missions: Mission[];
   stats: { total: number; enAttente: number; enCours: number };
 };
@@ -33,7 +33,7 @@ export type Candidature = {
   statut: string;
   secretaire_id: string;
   created_at: string;
-  secretaire: { id: string; nom: string; avatar_url?: string }[] | { id: string; nom: string; avatar_url?: string } | null;
+  secretaire: { id: string; nom: string }[] | { id: string; nom: string } | null;
 };
 
 export async function proposerOffreAction(candidatureId: number, secretaireId: string, missionId: number) {

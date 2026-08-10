@@ -29,7 +29,7 @@ const getSecretaireDashboardDataCached = unstable_cache(
       { data: twoFactor },
       { data: offres }
     ] = await Promise.all([
-      supabase.from('profils').select('nom, avatar_url').eq('id', userId).maybeSingle(),
+      supabase.from('profils').select('nom').eq('id', userId).maybeSingle(),
       supabase
         .from('missions')
         .select(`
@@ -92,14 +92,14 @@ const getEntrepriseDashboardDataCached = unstable_cache(
       { data: profil },
       { data: missions }
     ] = await Promise.all([
-      supabase.from('profils').select('nom, avatar_url').eq('id', userId).maybeSingle(),
+      supabase.from('profils').select('nom').eq('id', userId).maybeSingle(),
       supabase
         .from('missions')
         .select(`
           id, titre, statut, created_at,
           candidatures (
             id, statut, secretaire_id, created_at,
-            secretaire:profils!candidatures_secretaire_id_fkey ( id, nom, avatar_url )
+            secretaire:profils!candidatures_secretaire_id_fkey ( id, nom )
           )
         `)
         .eq('entreprise_id', userId)
