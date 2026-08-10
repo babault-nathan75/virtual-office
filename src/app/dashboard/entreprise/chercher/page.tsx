@@ -35,7 +35,31 @@ const DISPOS = [
 
 const DISPO_LABEL: Record<string, string> = Object.fromEntries(
   DISPOS.map(d => [d.value, d.label])
+
 );
+
+const SPECIALITES_SECRETAIRE = [
+  { group: 'Secrétariat Général et Administratif', items: [
+    'Secrétaire administratif', 'Secrétaire de direction', 'Secrétaire assistant',
+    'Secrétaire d\'accueil', 'Secrétaire bureautique',
+  ]},
+  { group: 'Secrétariat Spécialisé par Secteur', items: [
+    'Secrétaire médical', 'Secrétaire juridique', 'Secrétaire comptable',
+    'Secrétaire commercial', 'Secrétaire technique', 'Secrétaire RH',
+    'Secrétaire logistique', 'Secrétaire vétérinaire', 'Secrétaire paramédical',
+  ]},
+  { group: 'Langues et Communication', items: [
+    'Secrétaire bilingue', 'Secrétaire de rédaction', 'Secrétaire d\'édition',
+  ]},
+  { group: 'Secteur Public, Éducatif et Associatif', items: [
+    'Secrétaire de mairie', 'Secrétaire scolaire', 'Secrétaire d\'association',
+  ]},
+  { group: 'Formes Modernes', items: [
+    'Télésecrétaire', 'Secrétaire indépendant', 'Assistant virtuel',
+  ]},
+] as const;
+
+const ALL_SPECIALITES: string[] = SPECIALITES_SECRETAIRE.flatMap(g => [...g.items]);
 
 // ============================================================
 // Types
@@ -49,6 +73,7 @@ type Secretaire = {
   ville?: string | null;
   disponibilite?: string | null;
   niveau_etudes?: string | null;
+  specialite?: string | null;
   langues?: string[] | null;
   outils?: string[] | null;
   soft_skills?: string[] | null;
@@ -62,6 +87,7 @@ type Filters = {
   langues: string[];
   disponibilite: string;
   niveauEtudes: string;
+  specialite: string;
   ville: string;
   experienceMin: number;
 };
@@ -72,6 +98,7 @@ const INITIAL_FILTERS: Filters = {
   langues: [],
   disponibilite: '',
   niveauEtudes: '',
+  specialite: '',
   ville: '',
   experienceMin: 0,
 };
@@ -140,7 +167,13 @@ function scoreSecretaire(s: Secretaire, f: Filters) {
     if (s.ville?.toLowerCase().includes(f.ville.toLowerCase().trim())) score += 10;
   }
 
-  // 7. Années d'expérience min
+  // 7. Spécialité exacte
+  if (f.specialite) {
+    max += 15;
+    if (s.specialite === f.specialite) score += 15;
+  }
+
+  // 8. Années d'expérience min
   if (f.experienceMin > 0) {
     max += 10;
     if ((s.annees_experience ?? 0) >= f.experienceMin) score += 10;
@@ -260,7 +293,7 @@ export default function ChercherSecretaire() {
       // Données métier
       const { data: metiers } = await supabase
         .from('profils_secretaires')
-        .select('id, photo_url, bio, ville, disponibilite, niveau_etudes, langues, outils, soft_skills, competences, annees_experience')
+        .select('id, photo_url, bio, ville, disponibilite, niveau_etudes, specialite, langues, outils, soft_skills, competences, annees_experience')
         .in('id', visibleIds.length > 0 ? visibleIds : ['__none__']);
 
       // Merge
@@ -503,6 +536,20 @@ export default function ChercherSecretaire() {
 
             <div className="bg-white p-5 rounded-2xl border border-slate-100">
               <label className="block text-xs font-black uppercase tracking-widest text-slate-500 mb-3">
+                Spécialité
+              </label>
+              <select
+                value={filters.specialite}
+                onChange={e => setFilters(f => ({ ...f, specialite: e.target.value }))}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition bg-white"
+              >
+                <option value="">Indifférent</option>
+                {ALL_SPECIALITES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-100">
+              <label className="block text-xs font-black uppercase tracking-widest text-slate-500 mb-3">
                 Outils requis
               </label>
               <ChipMultiSelect options={OUTILS} selected={filters.outils} onChange={(v) => setFilters(f => ({ ...f, outils: v }))} />
@@ -564,6 +611,11 @@ function ResultCard({ s, onOpen }: { s: Secretaire & { match: number; score: num
             {s.ville || 'Ville non précisée'}
             {s.annees_experience ? ` · ${s.annees_experience} an${s.annees_experience > 1 ? 's' : ''} d'exp.` : ''}
           </p>
+          {s.specialite && (
+            <span className="inline-block mt-1 text-[10px] font-bold uppercase tracking-wide bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
+              {s.specialite}
+            </span>
+          )}
         </div>
         <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full border ${matchStyle}`}>
           {s.match}% match
@@ -689,6 +741,7 @@ function ProfileModal({ s, onClose }: { s: Secretaire; onClose: () => void }) {
           </div>
 
           <div className="grid grid-cols-2 gap-3">
+            <InfoCell label="Spécialité" value={s.specialite} />
             <InfoCell label="Ville" value={s.ville} />
             <InfoCell label="Disponibilité" value={s.disponibilite ? DISPO_LABEL[s.disponibilite] : null} />
             <InfoCell label="Niveau d'études" value={s.niveau_etudes} />

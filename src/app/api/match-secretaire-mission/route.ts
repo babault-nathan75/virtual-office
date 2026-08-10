@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     // Récupérer le profil de la secrétaire
     const { data: profil } = await supabaseAdmin
       .from('profils_secretaires')
-      .select('bio, competences, outils, soft_skills, langues, ville, disponibilite, niveau_etudes, annees_experience')
+      .select('bio, competences, outils, soft_skills, langues, ville, disponibilite, niveau_etudes, specialite, annees_experience')
       .eq('id', secretaireId)
       .single();
 
@@ -63,6 +63,7 @@ export async function POST(req: NextRequest) {
     const prompt = `Tu es un expert en recrutement. Évalue la compatibilité entre cette secrétaire et la mission suivante.
 
 Profil de la secrétaire :
+- Spécialité : ${profil.specialite || 'Non renseignée'}
 - Bio : ${profil.bio || 'Non renseignée'}
 - Compétences : ${profil.competences?.join(', ') || 'Aucune'}
 - Outils maîtrisés : ${profil.outils?.join(', ') || 'Aucun'}

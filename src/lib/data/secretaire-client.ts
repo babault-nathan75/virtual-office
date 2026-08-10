@@ -25,6 +25,7 @@ export type SecretaireProfil = {
   ville: string | null;
   disponibilite: string | null;
   niveau_etudes: string | null;
+  specialite: string | null;
   langues: string[] | null;
   outils: string[] | null;
   soft_skills: string[] | null;

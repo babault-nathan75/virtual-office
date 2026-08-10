@@ -40,6 +40,27 @@ const DISPOS = [
   { value: 'a_discuter', label: 'À discuter' },
 ] as const;
 
+const SPECIALITES_SECRETAIRE = [
+  { group: 'Secrétariat Général et Administratif', items: [
+    'Secrétaire administratif', 'Secrétaire de direction', 'Secrétaire assistant',
+    'Secrétaire d\'accueil', 'Secrétaire bureautique',
+  ]},
+  { group: 'Secrétariat Spécialisé par Secteur', items: [
+    'Secrétaire médical', 'Secrétaire juridique', 'Secrétaire comptable',
+    'Secrétaire commercial', 'Secrétaire technique', 'Secrétaire RH',
+    'Secrétaire logistique', 'Secrétaire vétérinaire', 'Secrétaire paramédical',
+  ]},
+  { group: 'Langues et Communication', items: [
+    'Secrétaire bilingue', 'Secrétaire de rédaction', 'Secrétaire d\'édition',
+  ]},
+  { group: 'Secteur Public, Éducatif et Associatif', items: [
+    'Secrétaire de mairie', 'Secrétaire scolaire', 'Secrétaire d\'association',
+  ]},
+  { group: 'Formes Modernes', items: [
+    'Télésecrétaire', 'Secrétaire indépendant', 'Assistant virtuel',
+  ]},
+] as const;
+
 // ============================================================
 // Petits helpers d'UI
 // ============================================================
@@ -137,6 +158,7 @@ export default function ProfilSecretaire() {
   const [ville, setVille] = useState('');
   const [disponibilite, setDisponibilite] = useState<string>('');
   const [niveauEtudes, setNiveauEtudes] = useState<string>('');
+  const [specialite, setSpecialite] = useState<string>('');
   const [langues, setLangues] = useState<string[]>([]);
   const [outils, setOutils] = useState<string[]>([]);
   const [softSkills, setSoftSkills] = useState<string[]>([]);
@@ -164,6 +186,7 @@ export default function ProfilSecretaire() {
         setVille(data.ville ?? '');
         setDisponibilite(data.disponibilite ?? '');
         setNiveauEtudes(data.niveau_etudes ?? '');
+        setSpecialite(data.specialite ?? '');
         setLangues(data.langues ?? []);
         setOutils(data.outils ?? []);
         setSoftSkills(data.soft_skills ?? []);
@@ -243,6 +266,7 @@ export default function ProfilSecretaire() {
       ville: ville || null,
       disponibilite: disponibilite || null,
       niveau_etudes: niveauEtudes || null,
+      specialite: specialite || null,
       langues,
       outils,
       soft_skills: softSkills,
@@ -381,6 +405,25 @@ export default function ProfilSecretaire() {
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">Disponibilité</label>
                   <RadioRow options={DISPOS} value={disponibilite} onChange={setDisponibilite} />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-1.5">
+                    Spécialité <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={specialite}
+                    onChange={e => setSpecialite(e.target.value)}
+                    required
+                    className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none transition focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                  >
+                    <option value="">— Choisissez votre spécialité —</option>
+                    {SPECIALITES_SECRETAIRE.map(g => (
+                      <optgroup key={g.group} label={g.group}>
+                        {g.items.map(s => <option key={s} value={s}>{s}</option>)}
+                      </optgroup>
+                    ))}
+                  </select>
                 </div>
               </section>
 

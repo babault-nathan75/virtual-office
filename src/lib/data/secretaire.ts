@@ -49,7 +49,7 @@ const getSecretaireDashboardDataCached = unstable_cache(
         .order('created_at', { ascending: false }),
       supabase
         .from('profils_secretaires')
-        .select('photo_url, bio, ville, disponibilite, niveau_etudes, langues, outils, soft_skills, competences, annees_experience')
+        .select('photo_url, bio, ville, disponibilite, niveau_etudes, specialite, langues, outils, soft_skills, competences, annees_experience')
         .eq('id', userId)
         .maybeSingle(),
       supabase.from('kyc_verifications').select('statut').eq('user_id', userId).maybeSingle(),
@@ -139,9 +139,9 @@ export function computeProfileCompletion(
   twoFactorEnabled: boolean
 ): number {
   const SCORE_WEIGHTS = {
-    photo_url: 12, competences: 12, outils: 12, annees_experience: 12,
-    bio: 8, soft_skills: 8, niveau_etudes: 5, ville: 5, langues: 7,
-    disponibilite: 7, kyc: 10, twoFactor: 10
+    photo_url: 10, competences: 10, outils: 10, annees_experience: 10, specialite: 12,
+    bio: 7, soft_skills: 7, niveau_etudes: 5, ville: 5, langues: 6,
+    disponibilite: 6, kyc: 12, twoFactor: 10
   };
 
   let score = 0;
@@ -151,6 +151,7 @@ export function computeProfileCompletion(
   if (Array.isArray(profil.competences) && profil.competences.length > 0) score += SCORE_WEIGHTS.competences;
   if (Array.isArray(profil.outils) && profil.outils.length > 0) score += SCORE_WEIGHTS.outils;
   if (typeof profil.annees_experience === 'number' && profil.annees_experience > 0) score += SCORE_WEIGHTS.annees_experience;
+  if (typeof profil.specialite === 'string' && profil.specialite.length > 0) score += SCORE_WEIGHTS.specialite;
   if (typeof profil.bio === 'string' && profil.bio.trim().length >= 20) score += SCORE_WEIGHTS.bio;
   if (Array.isArray(profil.soft_skills) && profil.soft_skills.length > 0) score += SCORE_WEIGHTS.soft_skills;
   if (profil.niveau_etudes) score += SCORE_WEIGHTS.niveau_etudes;

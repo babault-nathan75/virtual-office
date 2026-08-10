@@ -12,6 +12,7 @@ const SecretaireSchema = z.object({
   ville: z.string().nullable().optional(),
   disponibilite: z.string().nullable().optional(),
   niveau_etudes: z.string().nullable().optional(),
+  specialite: z.string().nullable().optional(),
   langues: z.array(z.string()).nullable().optional(),
   outils: z.array(z.string()).nullable().optional(),
   soft_skills: z.array(z.string()).nullable().optional(),
@@ -25,6 +26,7 @@ const FiltersSchema = z.object({
   langues: z.array(z.string()).default([]),
   disponibilite: z.string().default(''),
   niveauEtudes: z.string().default(''),
+  specialite: z.string().default(''),
   ville: z.string().default(''),
   experienceMin: z.number().default(0),
 });
@@ -60,6 +62,7 @@ export async function POST(req: NextRequest) {
     const prompt = `Tu es un expert en recrutement de secrétaires. Analyse la correspondance entre ce profil de secrétaire et les critères de recherche d'une entreprise.
 
 Profil de la secrétaire :
+- Spécialité : ${secretaire.specialite || 'Non renseignée'}
 - Bio : ${secretaire.bio || 'Non renseignée'}
 - Compétences : ${secretaire.competences?.join(', ') || 'Aucune'}
 - Outils maîtrisés : ${secretaire.outils?.join(', ') || 'Aucun'}
@@ -71,6 +74,7 @@ Profil de la secrétaire :
 - Expérience : ${secretaire.annees_experience || 0} ans
 
 Filtres de recherche de l'entreprise :
+- Spécialité recherchée : ${filters.specialite || 'Indifférent'}
 - Recherche libre : ${filters.q || 'Aucune'}
 - Outils requis : ${filters.outils.length > 0 ? filters.outils.join(', ') : 'Aucun'}
 - Langues requises : ${filters.langues.length > 0 ? filters.langues.join(', ') : 'Aucune'}
