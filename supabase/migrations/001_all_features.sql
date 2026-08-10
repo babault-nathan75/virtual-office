@@ -198,3 +198,52 @@ DO $$ BEGIN
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_two_factor_auth_user ON two_factor_auth(user_id);
+
+-- =====================================================
+-- MIGRATION 008: KYC Verifications
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS kyc_verifications (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE UNIQUE NOT NULL,
+  type_compte TEXT NOT NULL,
+  statut TEXT NOT NULL DEFAULT 'pending',
+  piece_identite_url TEXT NOT NULL,
+  selfie_url TEXT NOT NULL,
+  document_entreprise_url TEXT,
+  motif_rejet TEXT,
+  prenom TEXT,
+  nom_naissance TEXT,
+  date_naissance TEXT,
+  nationalite TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE kyc_verifications ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Users read own KYC') THEN
+    CREATE POLICY "Users read own KYC" ON kyc_verifications FOR SELECT USING (auth.uid() = user_id);
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Users insert own KYC') THEN
+    CREATE POLICY "Users insert own KYC" ON kyc_verifications FOR INSERT WITH CHECK (auth.uid() = user_id);
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Users update own KYC') THEN
+    CREATE POLICY "Users update own KYC" ON kyc_verifications FOR UPDATE USING (auth.uid() = user_id);
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Admin full access KYC') THEN
+    CREATE POLICY "Admin full access KYC" ON kyc_verifications FOR ALL USING (
+      EXISTS (SELECT 1 FROM profils WHERE id = auth.uid() AND role = 'admin')
+    );
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_kyc_verifications_user ON kyc_verifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_kyc_verifications_status ON kyc_verifications(statut);

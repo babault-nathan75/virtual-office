@@ -1,23 +1,33 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from 'react';
 import { useRouter } from 'next/navigation';
+
 import Link from '@/components/Link';
-import Image from 'next/image';
-import { toast } from '@/components/Toast';
 import { SkeletonChat } from '@/components/Skeleton';
-import { usePullToRefresh } from '@/hooks/usePullToRefresh';
+import { toast } from '@/components/Toast';
 import { EmptyState } from '@/components/ui';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
+import { supabase } from '@/lib/supabaseClient';
+
+type UserRole = 'entreprise' | 'secretaire' | 'admin';
 
 type Profile = {
   id: string;
   nom: string;
-  role: 'entreprise' | 'secretaire' | 'admin';
-  email?: string;
-  telephone?: string;
-  avatar_url?: string;
-  last_seen?: string;
+  role: UserRole;
+  email?: string | null;
+  telephone?: string | null;
+  avatar_url?: string | null;
+  last_seen?: string | null;
 };
 
 type Message = {
@@ -33,569 +43,1290 @@ type Message = {
   closed_at: string | null;
 };
 
+type PresenceInfo = {
+  text: string;
+  dotClass: string;
+};
+
+const MESSAGE_SELECT =
+  'id, sender_id, receiver_id, content, read, read_at, closed, closed_by, closed_at, created_at';
+
+const PROFILE_SELECT =
+  'id, nom, role, email, telephone, avatar_url, last_seen';
+
+function isUserRole(value: unknown): value is UserRole {
+  return value === 'entreprise' || value === 'secretaire' || value === 'admin';
+}
+
+function getPresenceInfo(lastSeen: string | null | undefined, now: number): PresenceInfo {
+  if (!lastSeen) {
+    return {
+      text: 'Hors ligne',
+      dotClass: 'bg-slate-300',
+    };
+  }
+
+  const lastSeenTime = new Date(lastSeen).getTime();
+
+  if (Number.isNaN(lastSeenTime)) {
+    return {
+      text: 'Hors ligne',
+      dotClass: 'bg-slate-300',
+    };
+  }
+
+  const diffMinutes = Math.max(0, Math.floor((now - lastSeenTime) / 60_000));
+
+  if (diffMinutes < 3) {
+    return {
+      text: 'En ligne',
+      dotClass: 'bg-emerald-500',
+    };
+  }
+
+  if (diffMinutes < 60) {
+    return {
+      text: `Actif il y a ${diffMinutes} min`,
+      dotClass: 'bg-amber-400',
+    };
+  }
+
+  if (diffMinutes < 1_440) {
+    const hours = Math.floor(diffMinutes / 60);
+    return {
+      text: `Actif il y a ${hours} h`,
+      dotClass: 'bg-slate-300',
+    };
+  }
+
+  const days = Math.floor(diffMinutes / 1_440);
+
+  if (days === 1) {
+    return {
+      text: 'Actif hier',
+      dotClass: 'bg-slate-300',
+    };
+  }
+
+  return {
+    text: `Actif il y a ${days} j`,
+    dotClass: 'bg-slate-300',
+  };
+}
+
+function getRoleLabel(role: UserRole): string {
+  if (role === 'admin') return 'Administration';
+  if (role === 'secretaire') return 'Secrétaire';
+  return 'Entreprise';
+}
+
+function formatMessageTime(date: string): string {
+  return new Intl.DateTimeFormat('fr-FR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(date));
+}
+
+function formatDayLabel(date: string): string {
+  const messageDate = new Date(date);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  if (sameDay(messageDate, today)) return "Aujourd'hui";
+  if (sameDay(messageDate, yesterday)) return 'Hier';
+
+  return new Intl.DateTimeFormat('fr-FR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: messageDate.getFullYear() !== today.getFullYear() ? 'numeric' : undefined,
+  }).format(messageDate);
+}
+
+function isSameCalendarDay(first: string, second: string): boolean {
+  const a = new Date(first);
+  const b = new Date(second);
+
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
 export default function MessagesPage() {
   const router = useRouter();
-  const [currentUserId, setCurrentUserId] = useState<string>('');
-  const [currentRole, setCurrentRole] = useState<'entreprise' | 'secretaire' | 'admin'>('entreprise');
-  const [loading, setLoading] = useState(true);
 
-  // Pour Admin : Liste des contacts et contact actif
+  const [currentUserId, setCurrentUserId] = useState('');
+  const [currentRole, setCurrentRole] = useState<UserRole>('entreprise');
+  const [loading, setLoading] = useState(true);
+  const [contactsLoading, setContactsLoading] = useState(false);
+
   const [contacts, setContacts] = useState<Profile[]>([]);
   const [activeContact, setActiveContact] = useState<Profile | null>(null);
+  const [contactSearch, setContactSearch] = useState('');
 
-  // Messages et saisie
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [conversationActionLoading, setConversationActionLoading] = useState(false);
 
-  // Panneau de profil latéral (pour l'admin)
   const [showProfileDrawer, setShowProfileDrawer] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
-  // Discussion fermée
-  const [showClosed, setShowClosed] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const previousMessageCountRef = useRef(0);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
 
-  // 1. Initialisation & Heartbeat de présence
+  const conversationClosed = useMemo(
+    () => messages.some((message) => message.closed),
+    [messages],
+  );
+
+  const filteredContacts = useMemo(() => {
+    const query = contactSearch.trim().toLocaleLowerCase('fr-FR');
+
+    if (!query) return contacts;
+
+    return contacts.filter((contact) => {
+      const searchable = [
+        contact.nom,
+        getRoleLabel(contact.role),
+        contact.email ?? '',
+        contact.telephone ?? '',
+      ]
+        .join(' ')
+        .toLocaleLowerCase('fr-FR');
+
+      return searchable.includes(query);
+    });
+  }, [contactSearch, contacts]);
+
+  const activePresence = activeContact
+    ? getPresenceInfo(activeContact.last_seen, now)
+    : null;
+
+  const dashboardHref = currentRole === 'admin' ? '/admin' : '/dashboard';
+
+  // Session + profil courant.
   useEffect(() => {
+    let cancelled = false;
+
     const initSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        router.push('/connexion');
-        return;
-      }
+      try {
+        setLoading(true);
 
-      const userId = session.user.id;
-      setCurrentUserId(userId);
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
 
-      // Récupérer le profil
-      const { data: profil } = await supabase
-        .from('profils')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
+        if (sessionError) throw sessionError;
 
-      if (profil) {
-        setCurrentRole(profil.role as 'entreprise' | 'secretaire' | 'admin');
-      }
+        if (!session) {
+          router.replace('/connexion');
+          return;
+        }
 
-      setLoading(false);
-    };
-
-    initSession();
-
-    // Mettre à jour last_seen toutes les 30 secondes pour montrer l'activité
-    const updatePresence = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        await supabase
+        const { data: profile, error: profileError } = await supabase
           .from('profils')
-          .update({ last_seen: new Date().toISOString() })
-          .eq('id', session.user.id);
+          .select(PROFILE_SELECT)
+          .eq('id', session.user.id)
+          .maybeSingle();
+
+        if (profileError) throw profileError;
+
+        if (!profile || !isUserRole(profile.role)) {
+          toast.error('Votre profil est introuvable ou invalide.');
+          router.replace('/connexion');
+          return;
+        }
+
+        if (cancelled) return;
+
+        setCurrentRole(profile.role);
+        setCurrentUserId(session.user.id);
+      } catch (error) {
+        console.error('Initialisation de la messagerie impossible :', error);
+        toast.error('Impossible de charger votre session.');
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     };
 
-    updatePresence();
-    const presenceInterval = setInterval(updatePresence, 30_000);
-    return () => clearInterval(presenceInterval);
+    void initSession();
+
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
-  // 2. Chargement des contacts selon le rôle
+  // Heartbeat de présence du compte courant.
   useEffect(() => {
     if (!currentUserId) return;
 
-    const fetchContacts = async () => {
-      if (currentRole === 'admin') {
-        // L'admin voit toutes les entreprises et secrétaires
-        const { data } = await supabase
-          .from('profils')
-          .select('*')
-          .neq('id', currentUserId)
-          .order('nom', { ascending: true });
+    const updatePresence = async () => {
+      const { error } = await supabase
+        .from('profils')
+        .update({ last_seen: new Date().toISOString() })
+        .eq('id', currentUserId);
 
-        if (data && data.length > 0) {
-          setContacts(data);
-          setActiveContact(data[0]); // Sélectionner le premier par défaut
-        }
-      } else {
-        // Entreprise ou Secrétaire : discute avec l'Admin
-        const { data } = await supabase
-          .from('profils')
-          .select('*')
-          .eq('role', 'admin')
-          .limit(1)
-          .maybeSingle();
-
-        if (data) {
-          setContacts([data]);
-          setActiveContact(data);
-        }
+      if (error) {
+        console.warn('Mise à jour de présence impossible :', error.message);
       }
     };
 
-    fetchContacts();
-  }, [currentUserId, currentRole]);
+    void updatePresence();
+    const presenceInterval = window.setInterval(() => {
+      void updatePresence();
+    }, 30_000);
 
-  // 3. Charger les messages avec le contact actif et abonnement Realtime
+    return () => window.clearInterval(presenceInterval);
+  }, [currentUserId]);
+
+  // Horloge locale pour actualiser les libellés de présence.
   useEffect(() => {
-    if (!currentUserId || !activeContact) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
-    const fetchMessages = async () => {
-      const { data } = await supabase
-        .from('messages')
-        .select('id, sender_id, receiver_id, content, read, read_at, closed, closed_by, closed_at, created_at')
-        .or(`and(sender_id.eq.${currentUserId},receiver_id.eq.${activeContact.id}),and(sender_id.eq.${activeContact.id},receiver_id.eq.${currentUserId})`)
-        .order('created_at', { ascending: true });
+  // Liste des contacts autorisés selon le rôle.
+  useEffect(() => {
+    if (!currentUserId) return;
 
-      if (data) setMessages(data);
+    let cancelled = false;
 
-      // Marquer comme lus
-      await supabase
-        .from('messages')
-        .update({ read: true, read_at: new Date().toISOString() })
-        .eq('sender_id', activeContact.id)
-        .eq('receiver_id', currentUserId)
-        .eq('read', false);
+    const fetchContacts = async () => {
+      setContactsLoading(true);
+
+      try {
+        if (currentRole === 'admin') {
+          const { data, error } = await supabase
+            .from('profils')
+            .select(PROFILE_SELECT)
+            .neq('id', currentUserId)
+            .in('role', ['entreprise', 'secretaire'])
+            .order('nom', { ascending: true });
+
+          if (error) throw error;
+          if (cancelled) return;
+
+          const nextContacts = (data ?? []) as Profile[];
+          setContacts(nextContacts);
+          setActiveContact((previous) => {
+            if (previous && nextContacts.some((contact) => contact.id === previous.id)) {
+              return nextContacts.find((contact) => contact.id === previous.id) ?? previous;
+            }
+
+            return nextContacts[0] ?? null;
+          });
+        } else {
+          const { data, error } = await supabase
+            .from('profils')
+            .select(PROFILE_SELECT)
+            .eq('role', 'admin')
+            .order('nom', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+
+          if (error) throw error;
+          if (cancelled) return;
+
+          const admin = data as Profile | null;
+          setContacts(admin ? [admin] : []);
+          setActiveContact(admin);
+        }
+      } catch (error) {
+        console.error('Chargement des contacts impossible :', error);
+        toast.error('Impossible de charger les conversations.');
+      } finally {
+        if (!cancelled) setContactsLoading(false);
+      }
     };
 
-    fetchMessages();
+    void fetchContacts();
 
-    // Abonnement Realtime pour les messages
-    const channel = supabase
-      .channel(`chat:${currentUserId}-${activeContact.id}`)
+    return () => {
+      cancelled = true;
+    };
+  }, [currentRole, currentUserId]);
+
+  // Présence et informations profil en temps réel.
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    const profileChannel = supabase
+      .channel(`profiles-presence:${currentUserId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profils' },
+        (payload) => {
+          const updated = payload.new as Profile;
+
+          setContacts((previous) =>
+            previous.map((contact) =>
+              contact.id === updated.id ? { ...contact, ...updated } : contact,
+            ),
+          );
+
+          setActiveContact((previous) =>
+            previous?.id === updated.id ? { ...previous, ...updated } : previous,
+          );
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(profileChannel);
+    };
+  }, [currentUserId]);
+
+  const markConversationAsRead = useCallback(async () => {
+    if (!currentUserId || !activeContact) return;
+
+    const { error } = await supabase
+      .from('messages')
+      .update({ read: true, read_at: new Date().toISOString() })
+      .eq('sender_id', activeContact.id)
+      .eq('receiver_id', currentUserId)
+      .eq('read', false);
+
+    if (error) {
+      console.warn('Marquage des messages comme lus impossible :', error.message);
+    }
+  }, [activeContact, currentUserId]);
+
+  const fetchMessages = useCallback(async () => {
+    if (!currentUserId || !activeContact) {
+      setMessages([]);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('messages')
+      .select(MESSAGE_SELECT)
+      .or(
+        `and(sender_id.eq.${currentUserId},receiver_id.eq.${activeContact.id}),and(sender_id.eq.${activeContact.id},receiver_id.eq.${currentUserId})`,
+      )
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('Chargement des messages impossible :', error);
+      toast.error('Impossible de charger les messages.');
+      return;
+    }
+
+    setMessages((data ?? []) as Message[]);
+    await markConversationAsRead();
+  }, [activeContact, currentUserId, markConversationAsRead]);
+
+  // Chargement + Realtime de la conversation active.
+  useEffect(() => {
+    if (!currentUserId || !activeContact) {
+      setMessages([]);
+      return;
+    }
+
+    previousMessageCountRef.current = 0;
+    void fetchMessages();
+
+    const belongsToActiveConversation = (message: Message) =>
+      (message.sender_id === currentUserId && message.receiver_id === activeContact.id) ||
+      (message.sender_id === activeContact.id && message.receiver_id === currentUserId);
+
+    const messageChannel = supabase
+      .channel(`chat:${currentUserId}:${activeContact.id}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
-          const newMsg = payload.new as Message;
-          if (
-            (newMsg.sender_id === currentUserId && newMsg.receiver_id === activeContact.id) ||
-            (newMsg.sender_id === activeContact.id && newMsg.receiver_id === currentUserId)
-          ) {
-            setMessages((prev) => [...prev, newMsg]);
+          const inserted = payload.new as Message;
+          if (!belongsToActiveConversation(inserted)) return;
+
+          setMessages((previous) => {
+            if (previous.some((message) => message.id === inserted.id)) return previous;
+            return [...previous, inserted];
+          });
+
+          if (inserted.sender_id === activeContact.id && inserted.receiver_id === currentUserId) {
+            void supabase
+              .from('messages')
+              .update({ read: true, read_at: new Date().toISOString() })
+              .eq('id', inserted.id);
           }
-        }
+        },
       )
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'messages' },
         (payload) => {
           const updated = payload.new as Message;
-          setMessages((prev) => prev.map(m => m.id === updated.id ? { ...m, ...updated } : m));
-        }
+          if (!belongsToActiveConversation(updated)) return;
+
+          setMessages((previous) =>
+            previous.map((message) =>
+              message.id === updated.id ? { ...message, ...updated } : message,
+            ),
+          );
+        },
       )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      void supabase.removeChannel(messageChannel);
     };
-  }, [currentUserId, activeContact]);
+  }, [activeContact, currentUserId, fetchMessages]);
 
-  // Défilement automatique vers le bas des messages
+  // Auto-scroll uniquement lorsqu'un nouveau message est ajouté.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    if (messages.length > previousMessageCountRef.current) {
+      messagesEndRef.current?.scrollIntoView({
+        behavior: previousMessageCountRef.current === 0 ? 'auto' : 'smooth',
+        block: 'end',
+      });
+    }
 
-  // Envoyer un message
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !activeContact || sending) return;
+    previousMessageCountRef.current = messages.length;
+  }, [messages.length]);
+
+  // Auto-resize du champ de saisie.
+  useEffect(() => {
+    const textarea = composerRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = '0px';
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
+  }, [newMessage]);
+
+  // Fermeture du panneau profil avec Échap.
+  useEffect(() => {
+    if (!showProfileDrawer) return;
+
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setShowProfileDrawer(false);
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showProfileDrawer]);
+
+  const handleSendMessage = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const content = newMessage.trim();
+
+    if (!content || !activeContact || !currentUserId || sending || conversationClosed) {
+      return;
+    }
 
     setSending(true);
-    const contentToSend = newMessage.trim();
     setNewMessage('');
 
-    const { error } = await supabase.from('messages').insert({
-      sender_id: currentUserId,
-      receiver_id: activeContact.id,
-      content: contentToSend,
-      read: false,
-    });
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({
+        sender_id: currentUserId,
+        receiver_id: activeContact.id,
+        content,
+        read: false,
+      })
+      .select(MESSAGE_SELECT)
+      .single();
 
     if (error) {
+      console.error("Envoi du message impossible :", error);
       toast.error("Erreur lors de l'envoi du message.");
-      setNewMessage(contentToSend);
+      setNewMessage(content);
+      setSending(false);
+      return;
     }
+
+    const sentMessage = data as Message;
+    setMessages((previous) => {
+      if (previous.some((message) => message.id === sentMessage.id)) return previous;
+      return [...previous, sentMessage];
+    });
+
     setSending(false);
+    composerRef.current?.focus();
   };
 
-  // Fermer la discussion
+  const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+    }
+  };
+
   const closeConversation = async () => {
-    if (!activeContact) return;
+    if (!activeContact || !currentUserId || messages.length === 0 || conversationActionLoading) {
+      return;
+    }
+
+    setConversationActionLoading(true);
+    const closedAt = new Date().toISOString();
+
     const { error } = await supabase
       .from('messages')
-      .update({ closed: true, closed_by: currentUserId, closed_at: new Date().toISOString() })
-      .or(`and(sender_id.eq.${currentUserId},receiver_id.eq.${activeContact.id}),and(sender_id.eq.${activeContact.id},receiver_id.eq.${currentUserId})`)
+      .update({
+        closed: true,
+        closed_by: currentUserId,
+        closed_at: closedAt,
+      })
+      .or(
+        `and(sender_id.eq.${currentUserId},receiver_id.eq.${activeContact.id}),and(sender_id.eq.${activeContact.id},receiver_id.eq.${currentUserId})`,
+      )
       .eq('closed', false);
 
     if (error) {
-      toast.error('Erreur lors de la fermeture.');
+      console.error('Fermeture de la discussion impossible :', error);
+      toast.error('Erreur lors de la fermeture de la discussion.');
     } else {
-      setMessages(prev => prev.map(m => ({ ...m, closed: true, closed_by: currentUserId, closed_at: new Date().toISOString() })));
+      setMessages((previous) =>
+        previous.map((message) => ({
+          ...message,
+          closed: true,
+          closed_by: currentUserId,
+          closed_at: closedAt,
+        })),
+      );
       toast.success('Discussion fermée.');
     }
+
+    setConversationActionLoading(false);
   };
 
-  // Rouvrir la discussion
   const reopenConversation = async () => {
-    if (!activeContact) return;
+    if (!activeContact || !currentUserId || conversationActionLoading) return;
+
+    setConversationActionLoading(true);
+
     const { error } = await supabase
       .from('messages')
-      .update({ closed: false, closed_by: null, closed_at: null })
-      .or(`and(sender_id.eq.${currentUserId},receiver_id.eq.${activeContact.id}),and(sender_id.eq.${activeContact.id},receiver_id.eq.${currentUserId})`)
+      .update({
+        closed: false,
+        closed_by: null,
+        closed_at: null,
+      })
+      .or(
+        `and(sender_id.eq.${currentUserId},receiver_id.eq.${activeContact.id}),and(sender_id.eq.${activeContact.id},receiver_id.eq.${currentUserId})`,
+      )
       .eq('closed', true);
 
     if (error) {
-      toast.error("Erreur lors de la réouverture.");
+      console.error('Réouverture de la discussion impossible :', error);
+      toast.error('Erreur lors de la réouverture de la discussion.');
     } else {
-      setMessages(prev => prev.map(m => ({ ...m, closed: false, closed_by: null, closed_at: null })));
+      setMessages((previous) =>
+        previous.map((message) => ({
+          ...message,
+          closed: false,
+          closed_by: null,
+          closed_at: null,
+        })),
+      );
       toast.success('Discussion rouverte.');
     }
+
+    setConversationActionLoading(false);
   };
 
-  // Ticks de lecture
-  const renderTicks = (msg: Message) => {
-    if (msg.sender_id !== currentUserId) return null;
-    if (msg.read_at) {
+  const renderTicks = (message: Message) => {
+    if (message.sender_id !== currentUserId) return null;
+
+    if (message.read_at || message.read) {
       return (
-        <span className="text-blue-400 ml-1" title="Lu">
-          <svg className="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+        <span
+          className="inline-flex text-sky-200"
+          title={message.read_at ? 'Lu' : 'Distribué'}
+          aria-label={message.read_at ? 'Message lu' : 'Message distribué'}
+        >
+          <DoubleCheckIcon />
         </span>
       );
     }
-    if (msg.read) {
-      return (
-        <span className="text-blue-400 ml-1" title="Envoyé">
-          <svg className="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
-        </span>
-      );
-    }
+
     return (
-      <span className="text-slate-300 ml-1" title="Envoyé">
-        <svg className="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-        </svg>
+      <span
+        className="inline-flex text-white/60"
+        title="Envoyé"
+        aria-label="Message envoyé"
+      >
+        <CheckIcon />
       </span>
     );
   };
 
-  // Calcul du statut "En ligne" ou "Il y a X temps"
-  const getStatusInfo = (lastSeen?: string) => {
-    if (!lastSeen) return { text: 'Hors ligne', online: false, color: 'bg-slate-300' };
-
-    const diffMinutes = Math.floor((new Date().getTime() - new Date(lastSeen).getTime()) / 60000);
-
-    if (diffMinutes < 3) {
-      return { text: 'En ligne', online: true, color: 'bg-emerald-500 animate-pulse' };
-    } else if (diffMinutes < 60) {
-      return { text: `Actif il y a ${diffMinutes} min`, online: false, color: 'bg-amber-400' };
-    } else if (diffMinutes < 1440) {
-      const hours = Math.floor(diffMinutes / 60);
-      return { text: `Actif il y a ${hours}h`, online: false, color: 'bg-slate-300' };
-    } else {
-      return { text: 'Hors ligne', online: false, color: 'bg-slate-300' };
-    }
-  };
-
-  const fetchMessages = useCallback(async () => {
-    if (!currentUserId || !activeContact) return;
-    const { data } = await supabase
-      .from('messages')
-      .select('id, sender_id, receiver_id, content, read, read_at, closed, closed_by, closed_at, created_at')
-      .or(`and(sender_id.eq.${currentUserId},receiver_id.eq.${activeContact.id}),and(sender_id.eq.${activeContact.id},receiver_id.eq.${currentUserId})`)
-      .order('created_at', { ascending: true });
-    if (data) setMessages(data);
-  }, [currentUserId, activeContact]);
-
-  const { pulling, refreshing, onTouchStart, onTouchMove, onTouchEnd } = usePullToRefresh(fetchMessages);
+  const {
+    pulling,
+    refreshing,
+    onTouchStart,
+    onTouchMove,
+    onTouchEnd,
+  } = usePullToRefresh(fetchMessages);
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-        <div className="max-w-7xl mx-auto">
-          <div className="h-6 bg-slate-200 rounded animate-pulse w-32 mb-6" />
-          <div className="h-8 bg-slate-200 rounded animate-pulse w-48 mb-6" />
-          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-12 min-h-[600px]">
-            <div className="md:col-span-4 border-r border-slate-100 p-4 space-y-3">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-slate-200 animate-pulse" />
-                  <div className="flex-1 space-y-2">
-                    <div className="h-3 bg-slate-200 rounded animate-pulse w-1/2" />
-                    <div className="h-2 bg-slate-200 rounded animate-pulse w-3/4" />
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="md:col-span-8 flex items-center justify-center">
-              <SkeletonChat />
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    return <MessagesPageSkeleton />;
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans antialiased">
-      <div className="max-w-7xl mx-auto">
-        <Link
-          href="/dashboard"
-          className="inline-flex items-center text-sm font-bold text-blue-600 hover:text-blue-800 mb-4 transition"
-        >
-          ← Tableau de bord
-        </Link>
-
-        <header className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_#eff6ff_0,_#f8fafc_32rem,_#f8fafc_100%)] px-3 py-4 font-sans antialiased sm:px-5 md:px-8 md:py-7">
+      <div className="mx-auto w-full max-w-[1480px]">
+        <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-3xl font-black tracking-tight text-slate-900">Discussions</h1>
-            <p className="text-slate-500 font-medium mt-1">
+            <Link
+              href={dashboardHref}
+              className="group mb-4 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-slate-900"
+            >
+              <span className="grid h-8 w-8 place-items-center rounded-xl border border-slate-200 bg-white shadow-sm transition group-hover:-translate-x-0.5 group-hover:border-slate-300">
+                <ArrowLeftIcon />
+              </span>
+              {currentRole === 'admin' ? "Console d'administration" : 'Tableau de bord'}
+            </Link>
+
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-blue-700">
+                <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
+                Messagerie
+              </span>
+            </div>
+
+            <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
+              Discussions
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-500 sm:text-base">
               {currentRole === 'admin'
-                ? 'Gérez les échanges avec les secrétaires et entreprises.'
-                : 'Discutez directement avec l\'administration de SecrétariatPro.'}
+                ? 'Centralisez les échanges avec les entreprises et les secrétaires.'
+                : "Échangez directement avec l'administration de Secrétariat Pro."}
             </p>
           </div>
-        </header>
 
-        {/* Interface Chat Container */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden grid grid-cols-1 md:grid-cols-12 min-h-[600px] relative">
-          
-          {/* Sidebar des contacts (Visible pour admin ou si multi-contacts) */}
+          <div className="hidden rounded-2xl border border-white/80 bg-white/80 px-4 py-3 shadow-sm backdrop-blur sm:block">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
+              Espace actif
+            </p>
+            <p className="mt-1 text-sm font-bold text-slate-800">
+              {getRoleLabel(currentRole)}
+            </p>
+          </div>
+        </div>
+
+        <section className="relative grid h-[calc(100dvh-215px)] min-h-[620px] max-h-[900px] overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.10)] md:grid-cols-[330px_minmax(0,1fr)]">
           {currentRole === 'admin' && (
-            <div className="md:col-span-4 border-r border-slate-100 flex flex-col bg-slate-50/50">
-              <div className="p-4 border-b border-slate-100">
-                <h2 className="font-bold text-sm text-slate-800">Conversations ({contacts.length})</h2>
-              </div>
-              <div className="overflow-y-auto flex-1 divide-y divide-slate-50">
-                {contacts.length === 0 ? (
-                  <p className="p-6 text-center text-xs text-slate-400">Aucun contact trouvé</p>
-                ) : (
-                  contacts.map((contact) => {
-                    const status = getStatusInfo(contact.last_seen);
-                    const isSelected = activeContact?.id === contact.id;
+            <aside
+              className={`${activeContact ? 'hidden md:flex' : 'flex'} min-h-0 flex-col border-r border-slate-100 bg-slate-50/70`}
+            >
+              <div className="border-b border-slate-100 bg-white/90 p-4 backdrop-blur">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-extrabold text-slate-900">Conversations</h2>
+                    <p className="mt-0.5 text-xs font-medium text-slate-400">
+                      {contacts.length} contact{contacts.length > 1 ? 's' : ''}
+                    </p>
+                  </div>
+                  <span className="grid h-9 w-9 place-items-center rounded-xl bg-slate-900 text-white shadow-sm">
+                    <ChatIcon />
+                  </span>
+                </div>
 
-                    return (
-                      <button
-                        key={contact.id}
-                        onClick={() => {
-                          setActiveContact(contact);
-                          setShowProfileDrawer(false);
-                        }}
-                        className={`w-full text-left p-4 flex items-center gap-3 transition hover:bg-white ${
-                          isSelected ? 'bg-white shadow-sm border-l-4 border-blue-600' : 'opacity-80 hover:opacity-100'
-                        }`}
-                      >
-                        <div className="relative shrink-0">
-                          <Image
-                            src={contact.avatar_url || '/avatar-placeholder.png'}
-                            alt={contact.nom}
-                            width={42}
-                            height={42}
-                            className="rounded-full object-cover w-10 h-10 border border-slate-200"
-                          />
-                          <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${status.color}`} />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between">
-                            <h3 className="text-sm font-bold text-slate-900 truncate">{contact.nom}</h3>
+                <label className="relative block">
+                  <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+                    <SearchIcon />
+                  </span>
+                  <input
+                    type="search"
+                    value={contactSearch}
+                    onChange={(event) => setContactSearch(event.target.value)}
+                    placeholder="Rechercher une conversation"
+                    className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 text-sm font-medium text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-100/70"
+                  />
+                </label>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
+                {contactsLoading ? (
+                  <ContactListSkeleton />
+                ) : filteredContacts.length === 0 ? (
+                  <div className="grid min-h-52 place-items-center px-6 text-center">
+                    <div>
+                      <span className="mx-auto grid h-11 w-11 place-items-center rounded-2xl bg-white text-slate-400 shadow-sm ring-1 ring-slate-100">
+                        <SearchIcon />
+                      </span>
+                      <p className="mt-3 text-sm font-bold text-slate-700">
+                        Aucun résultat
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-slate-400">
+                        Essayez un nom, un rôle, un email ou un numéro.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {filteredContacts.map((contact) => {
+                      const status = getPresenceInfo(contact.last_seen, now);
+                      const selected = activeContact?.id === contact.id;
+
+                      return (
+                        <button
+                          key={contact.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveContact(contact);
+                            setShowProfileDrawer(false);
+                          }}
+                          className={`group w-full rounded-2xl p-3 text-left transition-all ${
+                            selected
+                              ? 'bg-white shadow-sm ring-1 ring-slate-200'
+                              : 'hover:bg-white/80'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Avatar profile={contact} presence={status} />
+
+                            <div className="min-w-0 flex-1">
+                              <div className="flex min-w-0 items-center justify-between gap-2">
+                                <h3 className="truncate text-sm font-extrabold text-slate-900">
+                                  {contact.nom}
+                                </h3>
+                                {selected && (
+                                  <span className="h-2 w-2 shrink-0 rounded-full bg-blue-600" />
+                                )}
+                              </div>
+
+                              <div className="mt-1 flex min-w-0 items-center gap-2">
+                                <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
+                                  {getRoleLabel(contact.role)}
+                                </span>
+                                <span className="truncate text-[11px] font-medium text-slate-400">
+                                  {status.text}
+                                </span>
+                              </div>
+                            </div>
                           </div>
-                          <p className="text-xs text-slate-400 capitalize mt-0.5">{contact.role}</p>
-                        </div>
-                      </button>
-                    );
-                  })
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
-            </div>
+            </aside>
           )}
 
-          {/* Fenêtre de discussion principale */}
-          <div className={`${currentRole === 'admin' ? 'md:col-span-8' : 'md:col-span-12'} flex flex-col bg-white relative`}>
+          <div
+            className={`${
+              currentRole === 'admin' && !activeContact ? 'hidden md:flex' : 'flex'
+            } relative min-h-0 min-w-0 flex-col bg-white ${
+              currentRole !== 'admin' ? 'md:col-span-2' : ''
+            }`}
+          >
             {activeContact ? (
               <>
-                {/* En-tête de la discussion */}
-                <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-white z-10">
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
-                      <Image
-                        src={activeContact.avatar_url || '/avatar-placeholder.png'}
-                        alt={activeContact.nom}
-                        width={40}
-                        height={40}
-                        className="rounded-full object-cover w-10 h-10 border border-slate-200"
-                      />
-                      <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${getStatusInfo(activeContact.last_seen).color}`} />
-                    </div>
-                    <div>
-                      <h2 className="text-sm font-bold text-slate-900">{activeContact.nom}</h2>
-                      <p className="text-xs font-medium text-slate-400 flex items-center gap-1.5 mt-0.5">
-                        <span className={`w-2 h-2 rounded-full inline-block ${getStatusInfo(activeContact.last_seen).color}`} />
-                        {getStatusInfo(activeContact.last_seen).text}
+                <header className="z-10 flex min-h-[76px] shrink-0 items-center justify-between gap-3 border-b border-slate-100 bg-white/95 px-3 py-3 backdrop-blur sm:px-5">
+                  <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+                    {currentRole === 'admin' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveContact(null);
+                          setShowProfileDrawer(false);
+                        }}
+                        className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 md:hidden"
+                        aria-label="Retour aux conversations"
+                      >
+                        <ArrowLeftIcon />
+                      </button>
+                    )}
+
+                    <Avatar
+                      profile={activeContact}
+                      presence={activePresence ?? getPresenceInfo(null, now)}
+                      large
+                    />
+
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <h2 className="truncate text-sm font-extrabold text-slate-950 sm:text-base">
+                          {activeContact.nom}
+                        </h2>
+                        <span className="hidden rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500 sm:inline">
+                          {getRoleLabel(activeContact.role)}
+                        </span>
+                      </div>
+
+                      <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs font-medium text-slate-400">
+                        <span
+                          className={`h-2 w-2 shrink-0 rounded-full ${activePresence?.dotClass ?? 'bg-slate-300'}`}
+                        />
+                        {activePresence?.text ?? 'Hors ligne'}
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    {/* Bouton profil (admin et autres rôles) */}
+                  <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
                     <button
-                      onClick={() => setShowProfileDrawer(!showProfileDrawer)}
-                      className="text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg transition flex items-center gap-1.5"
+                      type="button"
+                      onClick={() => setShowProfileDrawer(true)}
+                      className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+                      aria-label={`Afficher le profil de ${activeContact.nom}`}
                     >
-                      <span>🪪</span>
-                      <span>Profil</span>
+                      <ProfileIcon />
+                      <span className="hidden sm:inline">Profil</span>
                     </button>
 
-                    {/* Bouton fermer/rouvrir */}
-                    {messages.some(m => m.closed) ? (
+                    {conversationClosed ? (
                       <button
-                        onClick={reopenConversation}
-                        className="text-xs font-bold bg-emerald-100 hover:bg-emerald-200 text-emerald-700 px-3 py-2 rounded-lg transition"
+                        type="button"
+                        onClick={() => void reopenConversation()}
+                        disabled={conversationActionLoading}
+                        className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-50 px-3 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        🔓 Rouvrir
+                        <UnlockIcon />
+                        <span className="hidden sm:inline">Rouvrir</span>
                       </button>
                     ) : (
                       <button
-                        onClick={closeConversation}
-                        className="text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2 rounded-lg transition"
+                        type="button"
+                        onClick={() => void closeConversation()}
+                        disabled={messages.length === 0 || conversationActionLoading}
+                        title={messages.length === 0 ? 'Aucun message à fermer' : 'Fermer la discussion'}
+                        className="inline-flex h-10 items-center gap-2 rounded-xl bg-rose-50 px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
                       >
-                        🗄️ Fermer
+                        <ArchiveIcon />
+                        <span className="hidden sm:inline">Fermer</span>
                       </button>
                     )}
                   </div>
-                </div>
+                </header>
 
-                {/* Bannière discussion fermée */}
-                {messages.some(m => m.closed) && (
-                  <div className="bg-amber-50 border-b border-amber-100 px-4 py-2 flex items-center justify-between">
-                    <p className="text-xs font-bold text-amber-700">Cette discussion a été fermée.</p>
+                {conversationClosed && (
+                  <div className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-100 bg-amber-50/80 px-4 py-2.5 sm:px-5">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-amber-100 text-amber-700">
+                        <ArchiveIcon />
+                      </span>
+                      <p className="truncate text-xs font-semibold text-amber-800">
+                        Cette discussion est fermée. L’envoi de nouveaux messages est suspendu.
+                      </p>
+                    </div>
                     <button
-                      onClick={reopenConversation}
-                      className="text-xs font-bold text-emerald-600 hover:text-emerald-800 transition"
+                      type="button"
+                      onClick={() => void reopenConversation()}
+                      disabled={conversationActionLoading}
+                      className="shrink-0 text-xs font-extrabold text-emerald-700 transition hover:text-emerald-900 disabled:opacity-50"
                     >
-                      Rouvrir la discussion
+                      Rouvrir
                     </button>
                   </div>
                 )}
 
-                {/* Corps des messages */}
-                <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} className={`flex-1 p-4 md:p-6 overflow-y-auto space-y-4 bg-slate-50/30 max-h-[500px] transition ${pulling ? 'translate-y-2' : ''} ${refreshing ? 'opacity-60' : ''}`}>
+                <div
+                  onTouchStart={onTouchStart}
+                  onTouchMove={onTouchMove}
+                  onTouchEnd={onTouchEnd}
+                  className={`relative min-h-0 flex-1 overflow-y-auto bg-[linear-gradient(180deg,#f8fafc_0%,#ffffff_70%)] px-3 py-5 transition sm:px-6 ${
+                    pulling ? 'translate-y-1' : ''
+                  } ${refreshing ? 'opacity-60' : ''}`}
+                >
+                  {(pulling || refreshing) && (
+                    <div className="sticky top-0 z-10 mx-auto mb-3 w-fit rounded-full border border-slate-200 bg-white/95 px-3 py-1.5 text-[11px] font-bold text-slate-500 shadow-sm backdrop-blur">
+                      {refreshing ? 'Actualisation…' : 'Relâchez pour actualiser'}
+                    </div>
+                  )}
+
                   {messages.length === 0 ? (
-                    <EmptyState
-                      icon="💬"
-                      title={`Aucune discussion avec ${activeContact.nom}`}
-                      description="Envoyez un message pour démarrer la conversation."
-                    />
+                    <div className="grid h-full min-h-72 place-items-center">
+                      <EmptyState
+                        icon="💬"
+                        title={`Aucune discussion avec ${activeContact.nom}`}
+                        description="Envoyez un premier message pour démarrer la conversation."
+                      />
+                    </div>
                   ) : (
-                    messages.map((msg) => {
-                      const isMe = msg.sender_id === currentUserId;
-                      return (
-                        <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                          <div
-                            className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
-                              isMe
-                                ? 'bg-blue-600 text-white rounded-br-none'
-                                : 'bg-white text-slate-800 border border-slate-100 rounded-bl-none'
-                            }`}
-                          >
-                            <p className="leading-relaxed whitespace-pre-wrap">{msg.content}</p>
-                            <div className={`flex items-center justify-end gap-1 mt-1 ${isMe ? 'text-blue-100' : 'text-slate-400'}`}>
-                              <p className="text-[10px] font-medium">
-                                {new Date(msg.created_at).toLocaleTimeString('fr-FR', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
-                              </p>
-                              {renderTicks(msg)}
+                    <div className="mx-auto w-full max-w-4xl space-y-2">
+                      {messages.map((message, index) => {
+                        const isMe = message.sender_id === currentUserId;
+                        const previousMessage = messages[index - 1];
+                        const showDaySeparator =
+                          !previousMessage ||
+                          !isSameCalendarDay(previousMessage.created_at, message.created_at);
+
+                        return (
+                          <div key={message.id}>
+                            {showDaySeparator && (
+                              <div className="my-5 flex items-center gap-3" aria-hidden="true">
+                                <div className="h-px flex-1 bg-slate-200/80" />
+                                <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[10px] font-bold capitalize tracking-wide text-slate-400 shadow-sm">
+                                  {formatDayLabel(message.created_at)}
+                                </span>
+                                <div className="h-px flex-1 bg-slate-200/80" />
+                              </div>
+                            )}
+
+                            <div className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                              <div
+                                className={`max-w-[86%] rounded-2xl px-4 py-3 text-sm shadow-sm sm:max-w-[72%] ${
+                                  isMe
+                                    ? 'rounded-br-md bg-slate-900 text-white shadow-slate-900/10'
+                                    : 'rounded-bl-md border border-slate-200/80 bg-white text-slate-800'
+                                }`}
+                              >
+                                <p className="whitespace-pre-wrap break-words leading-6">
+                                  {message.content}
+                                </p>
+                                <div
+                                  className={`mt-1.5 flex items-center justify-end gap-1.5 ${
+                                    isMe ? 'text-white/60' : 'text-slate-400'
+                                  }`}
+                                >
+                                  <time
+                                    dateTime={message.created_at}
+                                    className="text-[10px] font-semibold"
+                                  >
+                                    {formatMessageTime(message.created_at)}
+                                  </time>
+                                  {renderTicks(message)}
+                                </div>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })
+                        );
+                      })}
+                      <div ref={messagesEndRef} />
+                    </div>
                   )}
-                  <div ref={messagesEndRef} />
                 </div>
 
-                {/* Formulaire d'envoi */}
-                {!messages.some(m => m.closed) ? (
-                  <form onSubmit={handleSendMessage} className="p-4 border-t border-slate-100 bg-white flex gap-2 items-center">
-                    <input
-                      type="text"
-                      value={newMessage}
-                      onChange={(e) => setNewMessage(e.target.value)}
-                      placeholder={`Écrire un message à ${activeContact.nom}...`}
-                      className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 focus:bg-white transition"
-                    />
-                    <button
-                      type="submit"
-                      disabled={sending || !newMessage.trim()}
-                      className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-5 py-3 rounded-xl text-sm font-bold shadow-md transition shrink-0"
-                    >
-                      Envoyer
-                    </button>
-                  </form>
-                ) : (
-                  <div className="p-4 border-t border-slate-100 bg-slate-50 text-center">
-                    <p className="text-xs text-slate-400 font-medium">Discussion fermée</p>
-                  </div>
-                )}
+                {!conversationClosed ? (
+                  <form
+                    onSubmit={handleSendMessage}
+                    className="shrink-0 border-t border-slate-100 bg-white p-3 sm:p-4"
+                  >
+                    <div className="mx-auto flex w-full max-w-4xl items-end gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2 shadow-sm transition focus-within:border-blue-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-100/60">
+                      <textarea
+                        ref={composerRef}
+                        value={newMessage}
+                        onChange={(event) => setNewMessage(event.target.value)}
+                        onKeyDown={handleComposerKeyDown}
+                        rows={1}
+                        maxLength={2_000}
+                        placeholder={`Écrire à ${activeContact.nom}…`}
+                        className="max-h-[120px] min-h-[42px] flex-1 resize-none bg-transparent px-2 py-2.5 text-sm font-medium leading-5 text-slate-800 outline-none placeholder:text-slate-400"
+                        aria-label={`Écrire un message à ${activeContact.nom}`}
+                      />
 
-                {/* Panneau latéral des coordonnées (Profil) */}
-                {showProfileDrawer && (
-                  <div className="absolute top-0 right-0 w-80 h-full bg-white border-l border-slate-200 shadow-xl z-20 flex flex-col p-6 animate-in slide-in-from-right duration-200">
-                    <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
-                      <h3 className="font-black text-slate-900 text-base">Coordonnées</h3>
                       <button
-                        onClick={() => setShowProfileDrawer(false)}
-                        className="text-slate-400 hover:text-slate-600 font-bold p-1"
+                        type="submit"
+                        disabled={sending || !newMessage.trim()}
+                        className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-600/20 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
+                        aria-label={sending ? 'Envoi en cours' : 'Envoyer le message'}
                       >
-                        ✕
+                        {sending ? <SpinnerIcon /> : <SendIcon />}
                       </button>
                     </div>
 
-                    <div className="flex flex-col items-center text-center mb-6">
-                      <Image
-                        src={activeContact.avatar_url || '/avatar-placeholder.png'}
-                        alt={activeContact.nom}
-                        width={72}
-                        height={72}
-                        className="rounded-full object-cover w-18 h-18 border-2 border-slate-100 shadow-sm mb-3"
-                      />
-                      <h4 className="font-bold text-slate-900 text-lg">{activeContact.nom}</h4>
-                      <span className="inline-block px-3 py-1 bg-blue-50 text-blue-600 text-xs font-bold uppercase rounded-full mt-1">
-                        {activeContact.role}
-                      </span>
+                    <div className="mx-auto mt-2 hidden max-w-4xl items-center justify-between px-1 text-[10px] font-medium text-slate-400 sm:flex">
+                      <span>Entrée pour envoyer · Maj + Entrée pour aller à la ligne</span>
+                      <span>{newMessage.length}/2000</span>
                     </div>
-
-                    <div className="space-y-4 text-sm flex-1">
-                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                        <span className="block text-xs text-slate-400 font-bold uppercase tracking-wider">Email</span>
-                        <span className="font-semibold text-slate-800 break-all">{activeContact.email || 'Non renseigné'}</span>
-                      </div>
-
-                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                        <span className="block text-xs text-slate-400 font-bold uppercase tracking-wider">Téléphone</span>
-                        <span className="font-semibold text-slate-800">{activeContact.telephone || 'Non renseigné'}</span>
-                      </div>
-
-                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                        <span className="block text-xs text-slate-400 font-bold uppercase tracking-wider">Dernière activité</span>
-                        <span className="font-semibold text-slate-800">{getStatusInfo(activeContact.last_seen).text}</span>
-                      </div>
-                    </div>
+                  </form>
+                ) : (
+                  <div className="shrink-0 border-t border-slate-100 bg-slate-50 px-4 py-4 text-center">
+                    <p className="text-xs font-semibold text-slate-500">
+                      La discussion est fermée. Rouvrez-la pour envoyer un message.
+                    </p>
                   </div>
+                )}
+
+                {showProfileDrawer && (
+                  <>
+                    <button
+                      type="button"
+                      aria-label="Fermer le panneau de profil"
+                      onClick={() => setShowProfileDrawer(false)}
+                      className="absolute inset-0 z-20 bg-slate-950/15 backdrop-blur-[1px]"
+                    />
+
+                    <aside
+                      className="absolute inset-y-0 right-0 z-30 flex w-[min(92vw,360px)] flex-col border-l border-slate-200 bg-white shadow-[-24px_0_60px_rgba(15,23,42,0.14)]"
+                      aria-label={`Profil de ${activeContact.nom}`}
+                    >
+                      <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
+                            Contact
+                          </p>
+                          <h3 className="mt-0.5 text-base font-black text-slate-950">
+                            Informations du profil
+                          </h3>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowProfileDrawer(false)}
+                          className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                          aria-label="Fermer"
+                        >
+                          <CloseIcon />
+                        </button>
+                      </div>
+
+                      <div className="min-h-0 flex-1 overflow-y-auto p-5">
+                        <div className="flex flex-col items-center rounded-3xl bg-slate-50 px-5 py-6 text-center ring-1 ring-slate-100">
+                          <Avatar
+                            profile={activeContact}
+                            presence={activePresence ?? getPresenceInfo(null, now)}
+                            extraLarge
+                          />
+                          <h4 className="mt-4 text-lg font-black text-slate-950">
+                            {activeContact.nom}
+                          </h4>
+                          <span className="mt-2 rounded-full bg-blue-50 px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider text-blue-700">
+                            {getRoleLabel(activeContact.role)}
+                          </span>
+                          <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-slate-400">
+                            <span
+                              className={`h-2 w-2 rounded-full ${activePresence?.dotClass ?? 'bg-slate-300'}`}
+                            />
+                            {activePresence?.text ?? 'Hors ligne'}
+                          </p>
+                        </div>
+
+                        <div className="mt-5 space-y-3">
+                          <ProfileField
+                            label="Email"
+                            value={activeContact.email || 'Non renseigné'}
+                          />
+                          <ProfileField
+                            label="Téléphone"
+                            value={activeContact.telephone || 'Non renseigné'}
+                          />
+                          <ProfileField
+                            label="Dernière activité"
+                            value={activePresence?.text ?? 'Hors ligne'}
+                          />
+                        </div>
+                      </div>
+                    </aside>
+                  </>
                 )}
               </>
             ) : (
-              <div className="flex-1 flex items-center justify-center p-12 text-center text-slate-400">
-                <p>Sélectionnez une conversation pour commencer.</p>
+              <div className="grid h-full min-h-[500px] place-items-center bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-8 text-center">
+                <div className="max-w-sm">
+                  <span className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-slate-900 text-white shadow-xl shadow-slate-900/10">
+                    <ChatIcon large />
+                  </span>
+                  <h2 className="mt-5 text-xl font-black text-slate-900">
+                    Sélectionnez une conversation
+                  </h2>
+                  <p className="mt-2 text-sm font-medium leading-6 text-slate-500">
+                    Choisissez un contact dans la liste pour consulter l’historique et poursuivre la discussion.
+                  </p>
+                </div>
               </div>
             )}
           </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+function MessagesPageSkeleton() {
+  return (
+    <main className="min-h-screen bg-slate-50 px-3 py-4 sm:px-5 md:px-8 md:py-7">
+      <div className="mx-auto w-full max-w-[1480px]">
+        <div className="mb-5">
+          <div className="mb-4 h-8 w-48 animate-pulse rounded-xl bg-slate-200" />
+          <div className="h-5 w-24 animate-pulse rounded-full bg-slate-200" />
+          <div className="mt-3 h-10 w-56 animate-pulse rounded-xl bg-slate-200" />
+          <div className="mt-3 h-5 w-full max-w-xl animate-pulse rounded-lg bg-slate-200" />
+        </div>
+
+        <div className="grid h-[calc(100dvh-215px)] min-h-[620px] max-h-[900px] overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm md:grid-cols-[330px_minmax(0,1fr)]">
+          <div className="hidden border-r border-slate-100 bg-slate-50/70 p-4 md:block">
+            <div className="mb-4 h-10 w-full animate-pulse rounded-xl bg-slate-200" />
+            <ContactListSkeleton />
+          </div>
+          <div className="grid place-items-center">
+            <SkeletonChat />
+          </div>
         </div>
       </div>
+    </main>
+  );
+}
+
+function ContactListSkeleton() {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 6 }).map((_, index) => (
+        <div key={index} className="flex items-center gap-3 rounded-2xl bg-white/60 p-3">
+          <div className="h-11 w-11 shrink-0 animate-pulse rounded-full bg-slate-200" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="h-3.5 w-1/2 animate-pulse rounded bg-slate-200" />
+            <div className="h-3 w-3/4 animate-pulse rounded bg-slate-100" />
+          </div>
+        </div>
+      ))}
     </div>
+  );
+}
+
+function Avatar({
+  profile,
+  presence,
+  large = false,
+  extraLarge = false,
+}: {
+  profile: Profile;
+  presence: PresenceInfo;
+  large?: boolean;
+  extraLarge?: boolean;
+}) {
+  const sizeClass = extraLarge
+    ? 'h-20 w-20'
+    : large
+      ? 'h-11 w-11 sm:h-12 sm:w-12'
+      : 'h-11 w-11';
+
+  return (
+    <div className="relative shrink-0">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={profile.avatar_url || '/avatar-placeholder.png'}
+        alt={`Avatar de ${profile.nom}`}
+        className={`${sizeClass} rounded-full border border-slate-200 bg-slate-100 object-cover shadow-sm`}
+      />
+      <span
+        className={`absolute bottom-0 right-0 rounded-full border-2 border-white ${
+          extraLarge ? 'h-4 w-4' : 'h-3.5 w-3.5'
+        } ${presence.dotClass}`}
+        title={presence.text}
+      />
+    </div>
+  );
+}
+
+function ProfileField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
+        {label}
+      </p>
+      <p className="mt-1.5 break-words text-sm font-bold text-slate-800">{value}</p>
+    </div>
+  );
+}
+
+function ArrowLeftIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-4 w-4" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 18l-6-6 6-6" />
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-4 w-4" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" strokeWidth="2" />
+      <path d="m20 20-3.5-3.5" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ChatIcon({ large = false }: { large?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      className={large ? 'h-7 w-7' : 'h-4 w-4'}
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+        d="M21 12a8 8 0 0 1-8 8H7l-4 2 1.5-4A8 8 0 1 1 21 12Z"
+      />
+      <path strokeLinecap="round" strokeWidth="1.8" d="M8 10h8M8 14h5" />
+    </svg>
+  );
+}
+
+function ProfileIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-4 w-4" aria-hidden="true">
+      <circle cx="12" cy="8" r="3" strokeWidth="1.8" />
+      <path d="M5 20a7 7 0 0 1 14 0" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ArchiveIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-4 w-4" aria-hidden="true">
+      <path d="M4 7h16v13H4z" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M3 4h18v3H3zM9 11h6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function UnlockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-4 w-4" aria-hidden="true">
+      <rect x="5" y="10" width="14" height="10" rx="2" strokeWidth="1.8" />
+      <path d="M9 10V7a3 3 0 0 1 5.5-1.7" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-4 w-4" aria-hidden="true">
+      <path d="m7 7 10 10M17 7 7 17" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-5 w-5" aria-hidden="true">
+      <path d="m4 4 17 8-17 8 3-8-3-8Z" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M7 12h14" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-3.5 w-3.5" aria-hidden="true">
+      <path d="m5 12 4 4L19 6" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function DoubleCheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-4 w-4" aria-hidden="true">
+      <path d="m2.5 12 4 4 8-9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="m9.5 15.5 2 2 10-11" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5 animate-spin" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeOpacity="0.3" strokeWidth="3" />
+      <path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
   );
 }

@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
-import Image from 'next/image';
 import Link from '@/components/Link';
 
 export default function TwoFASetup() {
@@ -17,6 +16,7 @@ export default function TwoFASetup() {
   const [message, setMessage] = useState({ text: '', type: '' });
   const [enabled, setEnabled] = useState(false);
   const [checking, setChecking] = useState(true);
+  const [userRole, setUserRole] = useState('');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -25,6 +25,10 @@ export default function TwoFASetup() {
         return;
       }
       setUserId(session.user.id);
+
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        setUserRole((user?.user_metadata?.role as string) || 'secretaire');
+      });
 
       supabase
         .from('two_factor_auth')
@@ -108,7 +112,7 @@ export default function TwoFASetup() {
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 to-blue-50/40 font-sans antialiased">
       <div className="max-w-lg mx-auto py-12 px-4">
-        <Link href="/dashboard/secretaire/profil" className="text-sm text-blue-600 hover:underline font-bold mb-6 inline-block">
+        <Link href={userRole === 'admin' ? '/dashboard/admin' : userRole === 'entreprise' ? '/dashboard/entreprise' : '/dashboard/secretaire/profil'} className="text-sm text-blue-600 hover:underline font-bold mb-6 inline-block">
           ← Retour au profil
         </Link>
 
@@ -168,7 +172,7 @@ export default function TwoFASetup() {
                     Scannez ce QR code avec Google Authenticator :
                   </p>
                   <div className="inline-block p-4 bg-white rounded-2xl border border-slate-200 shadow-sm">
-                    <Image src={qrData} alt="QR Code 2FA" width={200} height={200} />
+                    <img src={qrData} alt="QR Code 2FA" width={200} height={200} />
                   </div>
                   <p className="text-xs text-slate-400 mt-3">
                     Secret : <span className="font-mono bg-slate-100 px-2 py-1 rounded">{secret}</span>

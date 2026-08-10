@@ -1,0 +1,8 @@
+﻿Ôû▓ Next.js 16.2.1 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://172.26.96.1:3000
+- Environments: .env
+Ô£ô Ready in 1420ms
+- Experiments (use with caution):
+  ┬À optimizePackageImports
+

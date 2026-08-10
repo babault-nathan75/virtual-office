@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from '@/components/Link';
-import Image from 'next/image';
 import { Suspense } from 'react';
+import { toast } from '@/components/Toast';
 
 function TwoFAContent() {
   const router = useRouter();
@@ -68,7 +68,7 @@ function TwoFAContent() {
       setError(data.error || 'Erreur lors de l\'envoi');
     } else {
       setError('');
-      alert('Code envoyé par email !');
+      toast.success('Code envoyé par email !');
     }
     setSending(false);
   };
@@ -77,7 +77,7 @@ function TwoFAContent() {
     <main className="min-h-screen flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-slate-50 to-blue-50/40 font-sans antialiased">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center mb-8">
         <Link href="/" className="inline-flex flex-col items-center hover:opacity-90 transition">
-          <Image src="/logo.png" alt="Logo SecrétariatPro" width={72} height={72} priority className="rounded-2xl mb-3 object-contain shadow-lg shadow-blue-100" />
+          <img src="/logo.png" alt="Logo SecrétariatPro" width={72} height={72} className="rounded-2xl mb-3 object-contain shadow-lg shadow-blue-100" />
           <span className="text-2xl font-black tracking-tight text-slate-900">
             Secrétariat<span className="text-blue-600">Pro</span>
           </span>

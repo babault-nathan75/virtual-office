@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ThemeProvider } from '@/lib/ThemeContext';
 import { KeyboardProvider } from '@/lib/KeyboardContext';
 import { useSessionTimeout } from '@/hooks/useSessionTimeout';
 import CommandPalette from '@/components/CommandPalette';
@@ -26,14 +25,12 @@ function CommandPaletteWrapper() {
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <ThemeProvider>
-      <KeyboardProvider>
-        <SessionTimeoutWrapper>
-          <CommandPaletteWrapper />
-          {children}
-          <BottomNav />
-        </SessionTimeoutWrapper>
-      </KeyboardProvider>
-    </ThemeProvider>
+    <KeyboardProvider>
+      <SessionTimeoutWrapper>
+        <CommandPaletteWrapper />
+        {children}
+        <BottomNav />
+      </SessionTimeoutWrapper>
+    </KeyboardProvider>
   );
 }

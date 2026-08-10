@@ -10,7 +10,7 @@ import ConfirmModal from '@/components/ConfirmModal';
 type KycEntry = {
   id: number;
   user_id: string;
-  status: string;
+  statut: string;
   prenom: string;
   nom_naissance: string;
   date_naissance: string;
@@ -20,9 +20,9 @@ type KycEntry = {
   selfie_url: string;
   document_entreprise_url: string | null;
   nom_entreprise: string | null;
-  submitted_at: string;
-  reviewed_at: string | null;
-  rejection_reason: string | null;
+  created_at: string;
+  updated_at: string | null;
+  motif_rejet: string | null;
   user_nom: string;
   user_email: string;
 };
@@ -58,7 +58,7 @@ export default function AdminKycPage() {
     const { data: kycs } = await supabase
       .from('kyc_verifications')
       .select('*')
-      .order('submitted_at', { ascending: false });
+      .order('created_at', { ascending: false });
 
     if (!kycs) return;
 
@@ -82,14 +82,14 @@ export default function AdminKycPage() {
     setActing(kycId);
     const { error } = await supabase
       .from('kyc_verifications')
-      .update({ status: 'approved', reviewed_at: new Date().toISOString() })
+      .update({ statut: 'approved', updated_at: new Date().toISOString() })
       .eq('id', kycId);
 
     if (error) {
       toast.error(error.message);
     } else {
       toast.success('KYC approuvé !');
-      setKycList(prev => prev.map(k => k.id === kycId ? { ...k, status: 'approved', reviewed_at: new Date().toISOString() } : k));
+      setKycList(prev => prev.map(k => k.id === kycId ? { ...k, statut: 'approved', updated_at: new Date().toISOString() } : k));
     }
     setActing(null);
   };
@@ -101,9 +101,9 @@ export default function AdminKycPage() {
     const { error } = await supabase
       .from('kyc_verifications')
       .update({
-        status: 'rejected',
-        reviewed_at: new Date().toISOString(),
-        rejection_reason: rejectReason.trim() || null,
+        statut: 'rejected',
+        updated_at: new Date().toISOString(),
+        motif_rejet: rejectReason.trim() || null,
       })
       .eq('id', rejectModal);
 
@@ -111,14 +111,14 @@ export default function AdminKycPage() {
       toast.error(error.message);
     } else {
       toast.success('KYC refusé.');
-      setKycList(prev => prev.map(k => k.id === rejectModal ? { ...k, status: 'rejected', rejection_reason: rejectReason.trim() || null } : k));
+      setKycList(prev => prev.map(k => k.id === rejectModal ? { ...k, statut: 'rejected', motif_rejet: rejectReason.trim() || null } : k));
     }
     setRejectModal(null);
     setRejectReason('');
     setActing(null);
   };
 
-  const filtered = kycList.filter(k => filter === 'all' || k.status === filter);
+  const filtered = kycList.filter(k => filter === 'all' || k.statut === filter);
 
   if (loading) {
     return <div className="p-12 text-center text-slate-500 font-medium">Chargement...</div>;
@@ -134,7 +134,7 @@ export default function AdminKycPage() {
         <header className="mb-6">
           <h1 className="text-3xl font-black tracking-tight text-slate-900">Vérifications KYC</h1>
           <p className="text-slate-500 font-medium mt-1">
-            {kycList.filter(k => k.status === 'pending').length} demande(s) en attente
+            {kycList.filter(k => k.statut === 'pending').length} demande(s) en attente
           </p>
         </header>
 
@@ -151,7 +151,7 @@ export default function AdminKycPage() {
               }`}
             >
               {f === 'all' ? 'Tous' : f === 'pending' ? 'En attente' : f === 'approved' ? 'Approuvés' : 'Refusés'}
-              {f === 'pending' && ` (${kycList.filter(k => k.status === 'pending').length})`}
+              {f === 'pending' && ` (${kycList.filter(k => k.statut === 'pending').length})`}
             </button>
           ))}
         </div>
@@ -176,7 +176,7 @@ export default function AdminKycPage() {
                       <h3 className="font-black text-slate-900 tracking-tight">{kyc.prenom} {kyc.nom_naissance}</h3>
                       <p className="text-xs text-slate-500 font-medium">{kyc.user_email}</p>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        {kyc.type_compte === 'entreprise' ? '🏢 Entreprise' : '👩‍💻 Secrétaire'} · Soumis le {new Date(kyc.submitted_at).toLocaleDateString('fr-FR')}
+                        {kyc.type_compte === 'entreprise' ? '🏢 Entreprise' : '👩‍💻 Secrétaire'} · Soumis le {new Date(kyc.created_at).toLocaleDateString('fr-FR')}
                       </p>
                     </div>
                   </div>
@@ -188,7 +188,7 @@ export default function AdminKycPage() {
                     >
                       Voir détails
                     </button>
-                    {kyc.status === 'pending' && (
+                    {kyc.statut === 'pending' && (
                       <>
                         <button
                           onClick={() => handleApprove(kyc.id)}
@@ -206,10 +206,10 @@ export default function AdminKycPage() {
                         </button>
                       </>
                     )}
-                    {kyc.status === 'approved' && (
+                    {kyc.statut === 'approved' && (
                       <span className="px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">✓ Approuvé</span>
                     )}
-                    {kyc.status === 'rejected' && (
+                    {kyc.statut === 'rejected' && (
                       <span className="px-3 py-1.5 rounded-full text-xs font-bold bg-red-100 text-red-700">✕ Refusé</span>
                     )}
                   </div>
@@ -280,14 +280,14 @@ export default function AdminKycPage() {
                 </div>
               )}
 
-              {selectedKyc.rejection_reason && (
+              {selectedKyc.motif_rejet && (
                 <div className="bg-red-50 p-4 rounded-xl border border-red-200">
                   <p className="text-xs font-bold text-red-700 mb-1">Raison du refus</p>
-                  <p className="text-sm text-red-900">{selectedKyc.rejection_reason}</p>
+                  <p className="text-sm text-red-900">{selectedKyc.motif_rejet}</p>
                 </div>
               )}
 
-              {selectedKyc.status === 'pending' && (
+              {selectedKyc.statut === 'pending' && (
                 <div className="flex gap-3 pt-4 border-t border-slate-100">
                   <button
                     onClick={() => { handleApprove(selectedKyc.id); setSelectedKyc(null); }}
@@ -311,15 +311,6 @@ export default function AdminKycPage() {
       )}
 
       {/* Modale refus */}
-      <ConfirmModal
-        open={rejectModal !== null}
-        title="Refuser ce dossier KYC ?"
-        message="Veuillez indiquer la raison du refus. L'utilisateur sera notifié."
-        confirmLabel="Refuser"
-        danger
-        onConfirm={handleReject}
-        onCancel={() => { setRejectModal(null); setRejectReason(''); }}
-      />
       {rejectModal !== null && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[101]" onClick={() => setRejectModal(null)}>
           <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>

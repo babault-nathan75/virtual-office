@@ -234,7 +234,7 @@ export default function ChercherSecretaire() {
       const { data: approvedKycs } = await supabase
         .from('kyc_verifications')
         .select('user_id')
-        .eq('status', 'approved')
+        .eq('statut', 'approved')
         .eq('type_compte', 'secretaire');
 
       const approvedIds = (approvedKycs ?? []).map(k => k.user_id);

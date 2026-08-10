@@ -55,7 +55,7 @@ export default function RechercherPoste() {
       const { data: approvedKycs } = await supabase
         .from('kyc_verifications')
         .select('user_id')
-        .eq('status', 'approved')
+        .eq('statut', 'approved')
         .eq('type_compte', 'entreprise');
 
       const approvedEntIds = (approvedKycs ?? []).map(k => k.user_id);

@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from '@/components/Toast';
-import Image from 'next/image';
 import { SkeletonChat } from '@/components/Skeleton';
 import { isFeatureEnabled } from '@/lib/features';
 import { useSwipeActions } from '@/hooks/useSwipeActions';
@@ -102,7 +101,9 @@ export default function ChatWindow({ currentUserId, currentRole, adminId }: Prop
   const [editContent, setEditContent] = useState('');
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
-  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
+  const [audioChunks, setAudioChunksState] = useState<Blob[]>([]);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const setAudioChunks = (chunks: Blob[]) => { audioChunksRef.current = chunks; setAudioChunksState(chunks); };
   const [currentUserName, setCurrentUserName] = useState('Utilisateur');
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -139,11 +140,16 @@ export default function ChatWindow({ currentUserId, currentRole, adminId }: Prop
   };
 
   const fetchConversations = useCallback(async () => {
-    const { data: allMessages } = await supabase
+    const { data: allMessages, error } = await supabase
       .from('messages')
       .select('id, sender_id, receiver_id, content, read, closed, closed_by, deleted, created_at')
       .or(`sender_id.eq.${currentUserId},receiver_id.eq.${currentUserId}`)
       .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('[ChatWindow] fetchConversations error:', error);
+      return;
+    }
 
     if (!allMessages) return;
 
@@ -167,7 +173,11 @@ export default function ChatWindow({ currentUserId, currentRole, adminId }: Prop
     }
 
     const otherIds = Array.from(convMap.keys());
-    if (otherIds.length === 0) { setLoading(false); return; }
+    if (otherIds.length === 0) {
+      setConversations([]);
+      setSelectedConv(null);
+      return;
+    }
 
     const { data: profils } = await supabase.from('profils').select('id, nom, role').in('id', otherIds);
     const profilMap = new Map((profils ?? []).map(p => [p.id, { nom: p.nom, role: p.role }]));
@@ -183,9 +193,24 @@ export default function ChatWindow({ currentUserId, currentRole, adminId }: Prop
   }, [currentUserId]);
 
   useEffect(() => {
-    setLoading(true);
-    fetchConversations();
-  }, [fetchConversations]);
+    if (!currentUserId) return;
+
+    let cancelled = false;
+
+    const loadConversations = async () => {
+      setLoading(true);
+      try {
+        await fetchConversations();
+      } catch (err) {
+        console.error('[ChatWindow] loadConversations error:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    loadConversations();
+    return () => { cancelled = true; };
+  }, [currentUserId, fetchConversations]);
 
   // Realtime conv list
   useEffect(() => {
@@ -596,8 +621,9 @@ export default function ChatWindow({ currentUserId, currentRole, adminId }: Prop
   };
 
   const sendAudio = async () => {
-    if (audioChunks.length === 0 || !selectedConv) return;
-    const blob = new Blob(audioChunks, { type: 'audio/webm' });
+    const chunks = audioChunksRef.current;
+    if (chunks.length === 0 || !selectedConv) return;
+    const blob = new Blob(chunks, { type: 'audio/webm' });
     const ext = 'webm';
     const fileName = `voice-${Date.now()}.${ext}`;
     const filePath = `chat-audio/${currentUserId}/${fileName}`;
@@ -1123,7 +1149,8 @@ export default function ChatWindow({ currentUserId, currentRole, adminId }: Prop
             <button onClick={() => setShowProfile(false)} className={`${dark ? 'text-gray-400 hover:text-gray-200' : 'text-slate-400 hover:text-slate-600'} font-bold p-1`}>✕</button>
           </div>
           <div className="flex flex-col items-center text-center mb-6">
-            <Image src={activeProfile.avatar_url || '/avatar-placeholder.png'} alt={activeProfile.nom} width={72} height={72} className="rounded-full object-cover w-18 h-18 border-2 border-slate-100 dark:border-gray-600 shadow-sm mb-3" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={activeProfile.avatar_url || '/avatar-placeholder.png'} alt={activeProfile.nom} width={72} height={72} className="rounded-full object-cover w-18 h-18 border-2 border-slate-100 dark:border-gray-600 shadow-sm mb-3" />
             <h4 className={`font-bold text-lg ${dark ? 'text-white' : 'text-slate-900'}`}>{activeProfile.nom}</h4>
             <span className="inline-block px-3 py-1 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-bold uppercase rounded-full mt-1">{activeProfile.role}</span>
           </div>

@@ -2,6 +2,15 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function proxy(request: NextRequest) {
+  try {
+    return await proxyHandler(request);
+  } catch (error) {
+    console.error('[Proxy] Error:', error);
+    return NextResponse.next({ request });
+  }
+}
+
+async function proxyHandler(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -84,8 +93,6 @@ export async function proxy(request: NextRequest) {
       url.pathname = '/dashboard';
       return NextResponse.redirect(url);
     }
-
-
   }
 
   return supabaseResponse;
@@ -93,6 +100,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|html|ico|webmanifest|txt|xml|json)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|html|ico|webmanifest|txt|xml|json|js|css|woff|woff2|ttf|eot)$).*)',
   ],
 };

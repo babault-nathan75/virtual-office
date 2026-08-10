@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
-import Image from 'next/image';
 import { toast } from '@/components/Toast';
 import { Button, Card } from '@/components/ui';
 
@@ -20,7 +19,7 @@ export default function KycPage() {
   const router = useRouter();
   const [userId, setUserId] = useState('');
   const [role, setRole] = useState<'entreprise' | 'secretaire'>('entreprise');
-  const [existingKyc, setExistingKyc] = useState<{ status: string } | null>(null);
+  const [existingKyc, setExistingKyc] = useState<{ statut: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -57,7 +56,7 @@ export default function KycPage() {
       // Vérifier si un KYC existe déjà
       const { data: kyc } = await supabase
         .from('kyc_verifications')
-        .select('status')
+        .select('statut')
         .eq('user_id', session.user.id)
         .single();
 
@@ -143,7 +142,7 @@ export default function KycPage() {
     // Enregistrer le KYC
     const kycData = {
       user_id: userId,
-      status: 'pending',
+      statut: 'pending',
       prenom: form.prenom.trim(),
       nom_naissance: form.nom_naissance.trim(),
       date_naissance: form.date_naissance,
@@ -179,7 +178,7 @@ export default function KycPage() {
   }
 
   // Si KYC déjà soumis et en attente
-  if (existingKyc?.status === 'pending') {
+  if (existingKyc?.statut === 'pending') {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans antialiased">
         <div className="max-w-md w-full bg-white rounded-3xl border border-slate-100 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.08)] p-8 text-center">
@@ -210,7 +209,7 @@ export default function KycPage() {
     <main className="min-h-screen bg-slate-50 py-12 px-4 font-sans antialiased">
       <div className="max-w-2xl mx-auto">
         <Link href="/" className="inline-flex flex-col items-center hover:opacity-90 transition mb-8">
-          <Image src="/logo.png" alt="Logo SecrétariatPro" width={56} height={56} priority className="rounded-2xl mb-2 object-contain shadow-lg shadow-blue-100" />
+          <img src="/logo.png" alt="Logo SecrétariatPro" width={56} height={56} className="rounded-2xl mb-2 object-contain shadow-lg shadow-blue-100" />
           <span className="text-xl font-black tracking-tight text-slate-900">
             Secrétariat<span className="text-blue-600">Pro</span>
           </span>

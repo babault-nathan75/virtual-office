@@ -14,7 +14,7 @@ export const metadata: Metadata = {
     siteName: 'SecrétariatPro',
     locale: 'fr_FR',
     type: 'website',
-    images: [{ url: '/og-home.png', width: 1200, height: 630, alt: 'SecrétariatPro' }],
+    images: [{ url: '/logo.png', width: 1200, height: 630, alt: 'SecrétariatPro' }],
   },
   twitter: {
     card: 'summary_large_image',

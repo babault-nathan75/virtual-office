@@ -30,22 +30,22 @@ const TYPE_STYLES: Record<string, { icon: string; bg: string; text: string }> = 
 export default function NotificationBell({ userId, role }: Props) {
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [open, setOpen] = useState(false);
-  
   const ref = useRef<HTMLDivElement>(null);
-  // Use a ref to track previous count without triggering re-renders or violating pure state rules
   const prevCountRef = useRef(0);
+  const channelsRef = useRef<ReturnType<typeof supabase.channel>[]>([]);
+  const subIdRef = useRef(0);
 
   useEffect(() => {
     if (!userId) return;
 
     let isMounted = true;
 
-    const fetchNotifications = async () => {
+    const fetchInitial = async () => {
       try {
         const all: NotificationItem[] = [];
 
-        // ─── 1. MESSAGES NON LUS (tous les rôles) ───
-        const { data: unreadMsgs, error: msgError } = await supabase
+        // Messages non lus
+        const { data: unreadMsgs } = await supabase
           .from('messages')
           .select('id, sender_id, content, created_at')
           .eq('receiver_id', userId)
@@ -53,22 +53,17 @@ export default function NotificationBell({ userId, role }: Props) {
           .order('created_at', { ascending: false })
           .limit(5);
 
-        if (msgError) throw msgError;
-
-        if (unreadMsgs && unreadMsgs.length > 0) {
+        if (unreadMsgs?.length) {
           const senderIds = [...new Set(unreadMsgs.map(m => m.sender_id))];
           const { data: senders } = await supabase.from('profils').select('id, nom, role').in('id', senderIds);
           const senderMap = new Map((senders ?? []).map(s => [s.id, { nom: s.nom, role: s.role }]));
 
           for (const m of unreadMsgs) {
             const sender = senderMap.get(m.sender_id);
-            const senderName = sender?.nom || 'Utilisateur';
-            const title = role === 'admin' ? `Message de ${senderName}` : 'Message de l\'administration';
-            
             all.push({
               id: `msg-${m.id}`,
               type: 'message',
-              title,
+              title: role === 'admin' ? `Message de ${sender?.nom || 'Utilisateur'}` : 'Message de l\'administration',
               body: m.content.length > 60 ? m.content.slice(0, 60) + '...' : m.content,
               href: role === 'admin' ? '/dashboard/admin/messages' : '/dashboard/messages',
               read: false,
@@ -77,17 +72,16 @@ export default function NotificationBell({ userId, role }: Props) {
           }
         }
 
-        // ─── ADMIN ───
         if (role === 'admin') {
           // KYC en attente
           const { data: pendingKycs } = await supabase
             .from('kyc_verifications')
             .select('user_id, created_at')
-            .eq('status', 'pending')
+            .eq('statut', 'pending')
             .order('created_at', { ascending: false })
             .limit(5);
 
-          if (pendingKycs && pendingKycs.length > 0) {
+          if (pendingKycs?.length) {
             const kycUserIds = pendingKycs.map(k => k.user_id);
             const { data: users } = await supabase.from('profils').select('id, nom').in('id', kycUserIds);
             const userMap = new Map((users ?? []).map(u => [u.id, u.nom]));
@@ -113,7 +107,7 @@ export default function NotificationBell({ userId, role }: Props) {
             .order('created_at', { ascending: false })
             .limit(3);
 
-          if (recentMissions && recentMissions.length > 0) {
+          if (recentMissions?.length) {
             const entIds = recentMissions.map(m => m.entreprise_id);
             const { data: ents } = await supabase.from('profils').select('id, nom').in('id', entIds);
             const entMap = new Map((ents ?? []).map(e => [e.id, e.nom]));
@@ -137,7 +131,7 @@ export default function NotificationBell({ userId, role }: Props) {
             .select('id, titre, entreprise_id')
             .eq('entreprise_id', userId);
 
-          if (adminMissions && adminMissions.length > 0) {
+          if (adminMissions?.length) {
             const missionIds = adminMissions.map(m => m.id);
             const { data: newCands } = await supabase
               .from('candidatures')
@@ -147,7 +141,7 @@ export default function NotificationBell({ userId, role }: Props) {
               .order('created_at', { ascending: false })
               .limit(3);
 
-            if (newCands && newCands.length > 0) {
+            if (newCands?.length) {
               const secIds = [...new Set(newCands.map(c => c.secretaire_id))];
               const { data: secs } = await supabase.from('profils').select('id, nom').in('id', secIds);
               const secMap = new Map((secs ?? []).map(s => [s.id, s.nom]));
@@ -168,20 +162,19 @@ export default function NotificationBell({ userId, role }: Props) {
           }
         }
 
-        // ─── SECRÉTAIRE ───
         if (role === 'secretaire') {
           const { data: myKyc } = await supabase
             .from('kyc_verifications')
-            .select('status, updated_at')
+            .select('statut, updated_at')
             .eq('user_id', userId)
             .maybeSingle();
 
-          if (myKyc && (myKyc.status === 'approved' || myKyc.status === 'rejected')) {
+          if (myKyc && (myKyc.statut === 'approved' || myKyc.statut === 'rejected')) {
             all.push({
               id: `kyc-${userId}`,
               type: 'kyc',
-              title: myKyc.status === 'approved' ? 'KYC approuvé' : 'KYC refusé',
-              body: myKyc.status === 'approved'
+              title: myKyc.statut === 'approved' ? 'KYC approuvé' : 'KYC refusé',
+              body: myKyc.statut === 'approved'
                 ? 'Votre identité a été vérifiée. Votre profil est maintenant visible.'
                 : 'Votre vérification d\'identité a été refusée. Veuillez soumettre de nouveaux documents.',
               href: '/dashboard/kyc',
@@ -197,7 +190,7 @@ export default function NotificationBell({ userId, role }: Props) {
             .order('created_at', { ascending: false })
             .limit(3);
 
-          if (recentMissions && recentMissions.length > 0) {
+          if (recentMissions?.length) {
             for (const m of recentMissions) {
               all.push({
                 id: `mission-${m.id}`,
@@ -219,7 +212,7 @@ export default function NotificationBell({ userId, role }: Props) {
             .order('created_at', { ascending: false })
             .limit(3);
 
-          if (offres && offres.length > 0) {
+          if (offres?.length) {
             const entIds = offres.map(o => o.entreprise_id);
             const { data: ents } = await supabase.from('profils').select('id, nom').in('id', entIds);
             const entMap = new Map((ents ?? []).map(e => [e.id, e.nom]));
@@ -238,14 +231,13 @@ export default function NotificationBell({ userId, role }: Props) {
           }
         }
 
-        // ─── ENTREPRISE ───
         if (role === 'entreprise') {
           const { data: missions } = await supabase
             .from('missions')
             .select('id, titre')
             .eq('entreprise_id', userId);
 
-          if (missions && missions.length > 0) {
+          if (missions?.length) {
             const missionIds = missions.map(m => m.id);
             const { data: newCands } = await supabase
               .from('candidatures')
@@ -255,7 +247,7 @@ export default function NotificationBell({ userId, role }: Props) {
               .order('created_at', { ascending: false })
               .limit(3);
 
-            if (newCands && newCands.length > 0) {
+            if (newCands?.length) {
               const secIds = [...new Set(newCands.map(c => c.secretaire_id))];
               const { data: secs } = await supabase.from('profils').select('id, nom').in('id', secIds);
               const secMap = new Map((secs ?? []).map(s => [s.id, s.nom]));
@@ -276,43 +268,142 @@ export default function NotificationBell({ userId, role }: Props) {
           }
         }
 
-        // ─── Tri et mise à jour ───
-        if (!isMounted) return; // Prevent state update if unmounted
-
+        if (!isMounted) return;
         all.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        
         const unreadCount = all.filter(n => !n.read).length;
 
-        // Handle toast notifications outside of the React state setter
         if (unreadCount > prevCountRef.current && prevCountRef.current > 0) {
           toast.info(`Vous avez ${unreadCount} nouvelle(s) notification(s)`);
         }
         prevCountRef.current = unreadCount;
-
         setItems(all);
-
       } catch (error) {
-        console.error("Error fetching notifications:", error);
+        console.error('Error fetching notifications:', error);
       }
     };
 
-    fetchNotifications();
-    const interval = setInterval(fetchNotifications, 10_000);
-    
+    fetchInitial();
+
+    // Supabase Realtime subscriptions — all channels pushed to ref BEFORE subscribe
+    const channels: ReturnType<typeof supabase.channel>[] = [];
+    const subId = ++subIdRef.current;
+
+    // Messages
+    const messagesChannel = supabase
+      .channel(`notifications-messages-${userId}-${subId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `receiver_id=eq.${userId}` }, async (payload) => {
+        const m = payload.new as any;
+        if (m.read) return;
+        const { data: sender } = await supabase.from('profils').select('nom, role').eq('id', m.sender_id).single();
+        setItems(prev => {
+          const exists = prev.some(i => i.id === `msg-${m.id}`);
+          if (exists) return prev;
+          return [{
+            id: `msg-${m.id}`,
+            type: 'message' as const,
+            title: role === 'admin' ? `Message de ${sender?.nom || 'Utilisateur'}` : 'Message de l\'administration',
+            body: m.content.length > 60 ? m.content.slice(0, 60) + '...' : m.content,
+            href: role === 'admin' ? '/dashboard/admin/messages' : '/dashboard/messages',
+            read: false,
+            created_at: m.created_at,
+          }, ...prev].slice(0, 20);
+        });
+      });
+    channels.push(messagesChannel);
+
+    // Candidatures (pour entreprise et admin)
+    if (role === 'entreprise' || role === 'admin') {
+      const candsChannel = supabase
+        .channel(`notifications-candidatures-${userId}-${subId}`)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'candidatures', filter: `statut=eq.en_attente` }, async (payload) => {
+          const c = payload.new as any;
+          const { data: mission } = await supabase.from('missions').select('entreprise_id, titre').eq('id', c.mission_id).single();
+          if (!mission) return;
+          if (role === 'entreprise' && mission.entreprise_id !== userId) return;
+
+          const { data: secretaire } = await supabase.from('profils').select('nom').eq('id', c.secretaire_id).single();
+          setItems(prev => [{
+            id: `match-${c.id}`,
+            type: 'match' as const,
+            title: role === 'admin' ? 'Nouveau match' : 'Nouvelle candidature',
+            body: `${secretaire?.nom || 'Secrétaire'} a postulé pour « ${mission.titre} »`,
+            href: role === 'admin' ? '/dashboard/admin' : '/dashboard/entreprise',
+            read: false,
+            created_at: c.created_at,
+          }, ...prev].slice(0, 20));
+        });
+      channels.push(candsChannel);
+    }
+
+    // Offres (pour secrétaire)
+    if (role === 'secretaire') {
+      const offresChannel = supabase
+        .channel(`notifications-offres-${userId}-${subId}`)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'offres', filter: `secretaire_id=eq.${userId}` }, async (payload) => {
+          const o = payload.new as any;
+          const { data: entreprise } = await supabase.from('profils').select('nom').eq('id', o.entreprise_id).single();
+          setItems(prev => [{
+            id: `match-${o.id}`,
+            type: 'match' as const,
+            title: 'Nouveau match',
+            body: `${entreprise?.nom || 'Entreprise'} vous a proposé une collaboration`,
+            href: '/dashboard/secretaire',
+            read: false,
+            created_at: o.created_at,
+          }, ...prev].slice(0, 20));
+        });
+      channels.push(offresChannel);
+    }
+
+    // KYC (pour admin et secrétaire)
+    if (role === 'admin') {
+      const kycChannel = supabase
+        .channel(`notifications-kyc-admin-${subId}`)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'kyc_verifications', filter: 'statut=eq.pending' }, async (payload) => {
+          const k = payload.new as any;
+          const { data: user } = await supabase.from('profils').select('nom').eq('id', k.user_id).single();
+          setItems(prev => [{
+            id: `kyc-${k.user_id}`,
+            type: 'kyc' as const,
+            title: 'Nouvelle demande KYC',
+            body: `${user?.nom || 'Utilisateur'} a soumis ses documents`,
+            href: '/dashboard/admin/kyc',
+            read: false,
+            created_at: k.created_at,
+          }, ...prev].slice(0, 20));
+        });
+      channels.push(kycChannel);
+    } else if (role === 'secretaire') {
+      const kycChannel = supabase
+        .channel(`notifications-kyc-${userId}-${subId}`)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'kyc_verifications', filter: `user_id=eq.${userId}` }, async (payload) => {
+          const k = payload.new as any;
+          if (k.statut === 'approved' || k.statut === 'rejected') {
+            setItems(prev => [{
+              id: `kyc-${userId}`,
+              type: 'kyc' as const,
+              title: k.statut === 'approved' ? 'KYC approuvé' : 'KYC refusé',
+              body: k.statut === 'approved'
+                ? 'Votre identité a été vérifiée. Votre profil est maintenant visible.'
+                : 'Votre vérification d\'identité a été refusée. Veuillez soumettre de nouveaux documents.',
+              href: '/dashboard/kyc',
+              read: true,
+              created_at: k.updated_at,
+            }, ...prev].slice(0, 20));
+          }
+        });
+      channels.push(kycChannel);
+    }
+
+    channelsRef.current = channels;
+    channels.forEach(ch => ch.subscribe());
+
     return () => {
       isMounted = false;
-      clearInterval(interval);
+      channelsRef.current.forEach(ch => supabase.removeChannel(ch));
+      channelsRef.current = [];
     };
   }, [userId, role]);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    if (open) document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
 
   const unreadCount = items.filter(n => !n.read).length;
 
@@ -324,9 +415,7 @@ export default function NotificationBell({ userId, role }: Props) {
         try {
           await supabase.from('messages').update({ read: true }).in('id', ids);
           setItems(prev => prev.map(n => ({ ...n, read: true })));
-        } catch (error) {
-          toast.error("Erreur lors de la mise à jour des notifications.");
-        }
+        } catch { toast.error("Erreur lors de la mise à jour des notifications."); }
       }
     } else {
       setItems(prev => prev.map(n => ({ ...n, read: true })));
@@ -385,9 +474,7 @@ export default function NotificationBell({ userId, role }: Props) {
                           {new Date(item.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                         </p>
                       </div>
-                      {!item.read && (
-                        <div className="w-2 h-2 rounded-full bg-blue-500 mt-2 shrink-0" />
-                      )}
+                      {!item.read && <div className="w-2 h-2 rounded-full bg-blue-500 mt-2 shrink-0" />}
                     </div>
                   </Link>
                 );

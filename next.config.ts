@@ -1,4 +1,3 @@
-import { withSentryConfig } from '@sentry/nextjs';
 import type { NextConfig } from "next";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -15,26 +14,25 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  reactCompiler: true,
-  turbopack: { root: "." },
+  reactCompiler: false,
+  turbopack: { root: "C:/Users/hp/Desktop/Projet/secretariat-en-ligne" },
+  allowedDevOrigins: ['172.19.32.1'],
   images: {
-    remotePatterns: supabaseHost ? [{ protocol: "https", hostname: supabaseHost, pathname: "/storage/v1/object/public/**" }] : [],
+    remotePatterns: [
+      ...(supabaseHost ? [{ protocol: "https" as const, hostname: supabaseHost, pathname: "/storage/v1/object/public/**" }] : []),
+      { protocol: "https", hostname: "lh3.googleusercontent.com", pathname: "/**" },
+      { protocol: "https", hostname: "avatars.githubusercontent.com", pathname: "/**" },
+    ],
     formats: ['image/avif', 'image/webp'],
     minimumCacheTTL: 60 * 60 * 24 * 30,
   },
   headers: async () => [
     { source: '/(.*)', headers: securityHeaders },
     { source: '/api/:path*', headers: [...securityHeaders, { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate' }] },
-    { source: '/_next/static/(.*)', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] },
     { source: '/images/(.*)', headers: [{ key: 'Cache-Control', value: 'public, max-age=86400, stale-while-revalidate=604800' }] },
-    { source: '/sw.js', headers: [{ key: 'Cache-Control', value: 'public, max-age=0, must-revalidate' }, { key: 'Service-Worker-Allowed', value: '/' }] },
-    { source: '/manifest.webmanifest', headers: [{ key: 'Cache-Control', value: 'public, max-age=86400' }, { key: 'Content-Type', value: 'application/manifest+json' }] },
+    { source: '/sw.js', headers: [{ key: 'Cache-Control', value: 'no-cache, must-revalidate' }, { key: 'Service-Worker-Allowed', value: '/' }] },
   ],
   experimental: { optimizePackageImports: ['@heroicons/react', 'lucide-react'] },
 };
 
-export default withSentryConfig(nextConfig, {
-  silent: true,
-  org: process.env.SENTRY_ORG,
-  project: process.env.SENTRY_PROJECT,
-});
+export default nextConfig;

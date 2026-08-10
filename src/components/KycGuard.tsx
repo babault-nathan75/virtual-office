@@ -21,7 +21,7 @@ export default function KycGuard({ children }: { children: React.ReactNode }) {
         .from('profils')
         .select('role')
         .eq('id', session.user.id)
-        .single();
+        .maybeSingle();
 
       // Les admins bypassent le KYC
       if (profil?.role === 'admin') {
@@ -32,14 +32,14 @@ export default function KycGuard({ children }: { children: React.ReactNode }) {
 
       const { data: kyc } = await supabase
         .from('kyc_verifications')
-        .select('status')
+        .select('statut')
         .eq('user_id', session.user.id)
-        .single();
+        .maybeSingle();
 
       if (!kyc) {
         setStatus('none');
       } else {
-        setStatus(kyc.status as KycStatus);
+        setStatus(kyc.statut as KycStatus);
       }
       setLoading(false);
     };

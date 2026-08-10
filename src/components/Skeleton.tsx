@@ -14,8 +14,9 @@ export function SkeletonText({ lines = 3, className = '' }: { lines?: number; cl
   );
 }
 
+const AVATAR_SIZES: Record<number, string> = { 8: 'w-8 h-8', 10: 'w-10 h-10', 12: 'w-12 h-12', 16: 'w-16 h-16', 20: 'w-20 h-20' };
 export function SkeletonAvatar({ size = 10 }: { size?: number }) {
-  return <Skeleton className={`w-${size} h-${size} rounded-full shrink-0`} />;
+  return <Skeleton className={`${AVATAR_SIZES[size] || `w-[${size * 4}px] h-[${size * 4}px]`} rounded-full shrink-0`} />;
 }
 
 export function SkeletonCard() {

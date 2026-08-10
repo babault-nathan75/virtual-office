@@ -1,20 +1,20 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 
 export function useSwipeActions({ onSwipeLeft, onSwipeRight }: { onSwipeLeft?: () => void; onSwipeRight?: () => void }) {
-  const [startX, setStartX] = useState(0);
+  const startXRef = useRef(0);
   const [offset, setOffset] = useState(0);
 
   const onTouchStart = useCallback((e: React.TouchEvent) => {
-    setStartX(e.touches[0].clientX);
+    startXRef.current = e.touches[0].clientX;
     setOffset(0);
   }, []);
 
   const onTouchMove = useCallback((e: React.TouchEvent) => {
-    const diff = e.touches[0].clientX - startX;
+    const diff = e.touches[0].clientX - startXRef.current;
     setOffset(diff);
-  }, [startX]);
+  }, []);
 
   const onTouchEnd = useCallback(() => {
     if (offset < -80 && onSwipeLeft) onSwipeLeft();
