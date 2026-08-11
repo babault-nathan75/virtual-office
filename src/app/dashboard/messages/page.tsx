@@ -16,6 +16,7 @@ import { SkeletonChat } from '@/components/Skeleton';
 import { toast } from '@/components/Toast';
 import { EmptyState } from '@/components/ui';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { supabase } from '@/lib/supabaseClient';
 
 type UserRole = 'entreprise' | 'secretaire' | 'admin';
@@ -160,6 +161,7 @@ function isSameCalendarDay(first: string, second: string): boolean {
 
 export default function MessagesPage() {
   const router = useRouter();
+  useDocumentTitle('Discussions');
 
   const [currentUserId, setCurrentUserId] = useState('');
   const [currentRole, setCurrentRole] = useState<UserRole>('entreprise');

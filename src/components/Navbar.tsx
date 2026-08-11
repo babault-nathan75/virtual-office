@@ -320,8 +320,8 @@ export default function Navbar() {
             height={42}
             className="h-10 w-10 object-contain transition-transform duration-200 group-hover:scale-[1.03]"
           />
-          <span className="hidden whitespace-nowrap text-[22px] font-black tracking-[-0.04em] text-[#183b8f] sm:inline">
-            Secrétariat<span className="text-[#2376f3]">Pro</span>
+          <span className="hidden whitespace-nowrap text-[22px] font-black tracking-[-0.04em] text-blue-900 sm:inline">
+            Secrétariat<span className="text-blue-600">Pro</span>
           </span>
         </Link>
 
@@ -414,6 +414,18 @@ export default function Navbar() {
                       Mon profil
                     </Link>
 
+                    <Link
+                      href="/dashboard/notifications"
+                      role="menuitem"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
+                    >
+                      <svg aria-hidden="true" className="h-[18px] w-[18px] text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+                      </svg>
+                      Notifications
+                    </Link>
+
                     <button
                       type="button"
                       role="menuitem"
@@ -449,7 +461,7 @@ export default function Navbar() {
                 </Link>
                 <Link
                   href="/inscription"
-                  className="inline-flex h-11 items-center justify-center rounded-xl bg-[#1f67f2] px-5 text-sm font-extrabold text-white shadow-[0_8px_20px_rgba(31,103,242,0.24)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#1859dd] hover:shadow-[0_11px_28px_rgba(31,103,242,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+                  className="inline-flex h-11 items-center justify-center rounded-xl bg-blue-600 px-5 text-sm font-extrabold text-white shadow-[0_8px_20px_rgba(31,103,242,0.24)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-[0_11px_28px_rgba(31,103,242,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
                 >
                   S&apos;inscrire
                 </Link>
@@ -474,7 +486,7 @@ export default function Navbar() {
       {mobileOpen && (
         <div
           id="mobile-navigation"
-          className="absolute inset-x-0 top-full border-t border-slate-200 bg-white/95 px-4 py-4 shadow-[0_18px_50px_rgba(15,23,42,0.14)] backdrop-blur-xl md:hidden"
+          className="absolute inset-x-0 top-full border-t border-slate-200 bg-white/95 px-4 py-4 shadow-[0_18px_50px_rgba(15,23,42,0.14)] backdrop-blur-xl md:hidden mobile-menu-enter"
         >
           <div className="mx-auto max-w-md">
             {user ? (
@@ -517,6 +529,12 @@ export default function Navbar() {
                     <UserIcon />
                     Mon profil
                   </Link>
+                  <Link href="/dashboard/notifications" className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50">
+                    <svg aria-hidden="true" className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+                    </svg>
+                    Notifications
+                  </Link>
                 </nav>
 
                 <div className="my-3 h-px bg-slate-100" />
@@ -540,7 +558,7 @@ export default function Navbar() {
                 </Link>
                 <Link
                   href="/inscription"
-                  className="inline-flex h-12 items-center justify-center rounded-xl bg-[#1f67f2] text-sm font-extrabold text-white shadow-[0_8px_20px_rgba(31,103,242,0.24)] transition hover:bg-[#1859dd]"
+                  className="inline-flex h-12 items-center justify-center rounded-xl bg-blue-600 text-sm font-extrabold text-white shadow-[0_8px_20px_rgba(31,103,242,0.24)] transition hover:bg-blue-700"
                 >
                   S&apos;inscrire
                 </Link>

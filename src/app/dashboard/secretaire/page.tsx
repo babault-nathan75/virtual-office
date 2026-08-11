@@ -3,6 +3,9 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { redirect } from 'next/navigation';
 import SecretaireDashboardClient from './SecretaireDashboardClient';
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = { title: 'Tableau de bord Secrétaire' };
 
 async function getUser() {
   const cookieStore = await cookies();

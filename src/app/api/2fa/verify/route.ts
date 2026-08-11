@@ -2,22 +2,36 @@ import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import * as OTPAuth from 'otpauth';
 import { getAuthenticatedUser } from '@/lib/auth';
+import { z } from 'zod';
+import { checkRateLimit } from '@/lib/rateLimit';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-export async function POST(request: Request) {
-  const { userId, code } = await request.json();
+const verifySchema = z.object({
+  userId: z.string().uuid(),
+  code: z.string().length(6, 'Le code doit contenir 6 chiffres'),
+});
 
-  if (!userId || !code) {
-    return NextResponse.json({ error: 'Missing userId or code' }, { status: 400 });
+export async function POST(request: Request) {
+  const rateLimitResult = await checkRateLimit('2fa-verify', 5, 60000);
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json({ error: 'Trop de requêtes. Réessayez plus tard.' }, { status: 429 });
   }
 
+  const body = await request.json();
+  const parsed = verifySchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Données invalides' }, { status: 400 });
+  }
+
+  const { userId, code } = parsed.data;
+
   const user = await getAuthenticatedUser();
-  if (user && user.id !== userId) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!user || user.id !== userId) {
+    return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
   }
 
   const { data: tfa, error } = await supabaseAdmin

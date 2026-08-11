@@ -2,36 +2,49 @@ import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { escapeHtml } from '@/lib/sanitize';
 import { requireAuth } from '@/lib/auth';
+import { checkRateLimit } from '@/lib/rateLimit';
+import { z } from 'zod';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+const exportSchema = z.object({
+  userId: z.string().uuid(),
+  otherId: z.string().uuid(),
+  format: z.enum(['csv', 'pdf']).optional(),
+});
+
 export async function POST(request: Request) {
+  const rateLimitResult = await checkRateLimit('msg-export', 5, 60000);
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json({ error: 'Trop de requêtes' }, { status: 429 });
+  }
+
   let user;
   try {
     user = await requireAuth();
   } catch {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
   }
 
-  let userId: string, otherId: string, format: string;
+  let body: unknown;
   try {
-    const body = await request.json();
-    userId = body.userId;
-    otherId = body.otherId;
-    format = body.format || 'csv';
+    body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return NextResponse.json({ error: 'Corps de requête invalide' }, { status: 400 });
   }
 
-  if (!userId || !otherId) {
-    return NextResponse.json({ error: 'Missing userId or otherId' }, { status: 400 });
+  const parsed = exportSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Paramètres invalides' }, { status: 400 });
   }
+
+  const { userId, otherId, format } = parsed.data;
 
   if (user.id !== userId && user.id !== otherId) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    return NextResponse.json({ error: 'Accès interdit' }, { status: 403 });
   }
 
   const { data: messages } = await supabaseAdmin
@@ -41,7 +54,7 @@ export async function POST(request: Request) {
     .order('created_at', { ascending: true });
 
   if (!messages || messages.length === 0) {
-    return NextResponse.json({ error: 'No messages found' }, { status: 404 });
+    return NextResponse.json({ error: 'Aucun message trouvé' }, { status: 404 });
   }
 
   const { data: profiles } = await supabaseAdmin
@@ -67,12 +80,11 @@ export async function POST(request: Request) {
     return new NextResponse(csv, {
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="discussion-${otherName}-${new Date().toISOString().slice(0, 10)}.csv"`,
+        'Content-Disposition': `attachment; filename="discussion-${otherName.replace(/[^a-zA-Z0-9]/g, '')}-${new Date().toISOString().slice(0, 10)}.csv"`,
       },
     });
   }
 
-  // PDF format (HTML-to-print)
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Discussion avec ${escapeHtml(otherName)}</title>
 <style>
@@ -94,8 +106,6 @@ ${messages.map(m => `
 </body></html>`;
 
   return new NextResponse(html, {
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-    },
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
   });
 }

@@ -16,7 +16,7 @@ export default function PasswordInput({ invalid, className, ...rest }: Props) {
         className={`w-full rounded-xl border pl-4 pr-12 py-3 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:border-transparent ${
           invalid
             ? 'border-red-300 bg-red-50 focus:ring-red-500'
-            : 'border-slate-200 focus:ring-blue-500'
+            : 'border-slate-200 bg-slate-50 focus:ring-blue-500 focus:bg-white'
         } ${className ?? ''}`}
         {...rest}
       />
@@ -25,8 +25,7 @@ export default function PasswordInput({ invalid, className, ...rest }: Props) {
         onClick={() => setVisible(v => !v)}
         aria-label={visible ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
         aria-pressed={visible}
-        tabIndex={-1}
-        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 transition hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all duration-200 active:scale-90"
       >
         {visible ? (
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8} aria-hidden="true">

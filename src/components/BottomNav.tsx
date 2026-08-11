@@ -43,7 +43,7 @@ export default function BottomNav() {
   const items = NAV_ITEMS[role] || NAV_ITEMS.entreprise;
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-50 safe-area-pb">
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-slate-200 z-50 safe-area-pb shadow-[0_-4px_20px_rgba(15,23,42,0.06)]">
       <div className="flex items-center justify-around py-1.5">
         {items.map(item => {
           const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
@@ -51,12 +51,15 @@ export default function BottomNav() {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition min-w-[60px] ${
+              className={`relative flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all duration-200 min-w-[60px] ${
                 isActive
-                  ? 'text-blue-600'
-                  : 'text-slate-400 hover:text-slate-600'
+                  ? 'text-blue-600 scale-105'
+                  : 'text-slate-400 hover:text-slate-600 active:scale-95'
               }`}
             >
+              {isActive && (
+                <span className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-6 h-1 bg-blue-600 rounded-full" />
+              )}
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={isActive ? 2.5 : 2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
               </svg>

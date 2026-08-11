@@ -79,7 +79,12 @@ export default function SecretaireDashboardClient({
       else toast.error('Erreur : ' + result.error.message);
       setMissionsState(prev => prev.map(m => m.id === missionId ? { ...m, candidatures: m.candidatures?.filter(c => c.secretaire_id !== userId) } : m));
     } else {
-      toast.success('Candidature envoyée !');
+      toast.undo('Candidature envoyée !', () => {
+        setMissionsState(prev => prev.map(m =>
+          m.id === missionId ? { ...m, candidatures: m.candidatures?.filter(c => c.secretaire_id !== userId) } : m
+        ));
+        setCandidaturesState(prev => prev.filter(c => c.mission_id !== missionId));
+      });
       setCandidaturesState(prev => [...prev, { mission_id: missionId, statut: 'en_attente', mission: { id: 0, titre: mission.titre } }]);
     }
   }, [missionsState, userId]);
@@ -97,7 +102,7 @@ export default function SecretaireDashboardClient({
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans antialiased text-slate-800">
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans antialiased text-slate-800 animate-[fadeSlideIn_0.3s_ease-out]">
       <div className="max-w-6xl mx-auto">
         {/* HEADER */}
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-sm mb-8 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 relative overflow-hidden">
@@ -168,9 +173,13 @@ export default function SecretaireDashboardClient({
             </div>
             {missionsState.length === 0 ? (
               <div className="bg-white p-12 rounded-3xl border border-dashed border-slate-300 text-center flex flex-col items-center justify-center">
-                <span className="text-4xl mb-4">📭</span>
-                <p className="text-slate-800 font-bold text-lg">Aucune mission pour le moment</p>
-                <p className="text-sm text-slate-500 mt-2 max-w-sm">Les entreprises publient de nouvelles offres régulièrement. Gardez l'œil ouvert !</p>
+                <div className="w-16 h-16 rounded-2xl bg-blue-50 flex items-center justify-center mb-4">
+                  <svg className="w-8 h-8 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m16.5 0V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v.75m16.5 0v7.5a2.25 2.25 0 01-2.25 2.25H6.75a2.25 2.25 0 01-2.25-2.25v-7.5" />
+                  </svg>
+                </div>
+                <p className="text-slate-800 font-bold text-lg mb-1">Aucune mission disponible</p>
+                <p className="text-sm text-slate-500 mt-1 max-w-sm">Les entreprises publient de nouvelles offres régulièrement. Revenez bientôt !</p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -213,7 +222,7 @@ export default function SecretaireDashboardClient({
           </div>
 
           {/* Colonne Droite : Suivi */}
-          <div className="space-y-8 lg:sticky lg:top-8 self-start">
+          <div className="space-y-8 lg:sticky lg:top-24 self-start">
             {/* Offres directes */}
             <section>
               <div className="flex items-center justify-between mb-4">
@@ -226,7 +235,12 @@ export default function SecretaireDashboardClient({
               </div>
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 {offresState.length === 0 ? (
-                  <div className="p-6 text-center"><p className="text-sm text-slate-500 font-medium">Aucune proposition reçue.</p></div>
+                  <div className="p-8 text-center">
+                    <div className="w-12 h-12 mx-auto rounded-xl bg-slate-50 flex items-center justify-center mb-3">
+                      <svg className="w-6 h-6 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>
+                    </div>
+                    <p className="text-sm text-slate-500 font-medium">Aucune proposition reçue</p>
+                  </div>
                 ) : (
                   <div className="divide-y divide-slate-100">
                     {offresState.map(o => {
@@ -258,7 +272,12 @@ export default function SecretaireDashboardClient({
               <h2 className="text-lg font-black tracking-tight text-slate-900 mb-4 flex items-center gap-2">📊 Mes candidatures</h2>
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 {candidaturesState.length === 0 ? (
-                  <div className="p-6 text-center"><p className="text-sm text-slate-500 font-medium">Vous n'avez postulé à aucune mission.</p></div>
+                  <div className="p-8 text-center">
+                    <div className="w-12 h-12 mx-auto rounded-xl bg-slate-50 flex items-center justify-center mb-3">
+                      <svg className="w-6 h-6 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" /></svg>
+                    </div>
+                    <p className="text-sm text-slate-500 font-medium">Aucune candidature envoyée</p>
+                  </div>
                 ) : (
                   <div className="divide-y divide-slate-100 max-h-[400px] overflow-y-auto">
                     {candidaturesState.map((c, idx) => (

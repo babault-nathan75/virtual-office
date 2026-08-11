@@ -116,6 +116,16 @@ export default function TwoFASetup() {
           ← Retour au profil
         </Link>
 
+        {userRole === 'admin' && !enabled && (
+          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3">
+            <span className="text-2xl">⚠️</span>
+            <div>
+              <p className="font-bold text-amber-800 text-sm">2FA obligatoire pour les administrateurs</p>
+              <p className="text-xs text-amber-600 mt-1">Vous devez activer l&apos;authentification à deux facteurs pour accéder au panneau d&apos;administration.</p>
+            </div>
+          </div>
+        )}
+
         <div className="bg-white rounded-3xl border border-slate-100 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.08)] p-8">
           <h1 className="text-2xl font-black tracking-tight text-slate-900 mb-2">Authentification à deux facteurs</h1>
           <p className="text-sm text-slate-500 font-medium mb-8">Sécurisez votre compte avec la 2FA.</p>

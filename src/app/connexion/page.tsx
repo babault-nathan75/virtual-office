@@ -96,16 +96,23 @@ function ConnexionContent() {
         }
       }
 
+      // Admin 2FA mandatory: redirect to 2FA setup if not enabled
+      if (finalRole === 'admin' && !tfa?.enabled) {
+        router.push(`/dashboard/profil/2fa?required=1`);
+        setLoading(false);
+        return;
+      }
+
       trackEvent('login_complete', { role: finalRole || 'unknown' });
 
       if (finalRole === 'entreprise') {
-        window.location.href = '/dashboard/entreprise';
+        router.push('/dashboard/entreprise');
       } else if (finalRole === 'secretaire') {
-        window.location.href = '/dashboard/secretaire';
+        router.push('/dashboard/secretaire');
       } else if (finalRole === 'admin') {
-        window.location.href = '/dashboard/admin';
+        router.push('/dashboard/admin');
       } else {
-        window.location.href = '/';
+        router.push('/');
       }
     }
   };
@@ -154,7 +161,7 @@ function ConnexionContent() {
           <form onSubmit={handleSubmit(handleSignIn)} className="space-y-5">
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1.5">Email</label>
-              <input type="email" {...register('email')} className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="votre@email.com" autoComplete="email" />
+              <input type="email" {...register('email')} className="w-full rounded-xl border border-slate-200 px-4 py-3 bg-slate-50 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent focus:bg-white" placeholder="votre@email.com" autoComplete="email" autoFocus />
               {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email.message}</p>}
             </div>
 

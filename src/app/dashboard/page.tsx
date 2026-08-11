@@ -1,15 +1,18 @@
 'use client';
 
 import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function DashboardRedirect() {
+  const router = useRouter();
+
   useEffect(() => {
     const identifyAndRedirect = async () => {
       const { data: { session } } = await supabase.auth.getSession();
 
       if (!session) {
-        window.location.href = '/connexion';
+        router.replace('/connexion');
         return;
       }
 
@@ -22,27 +25,29 @@ export default function DashboardRedirect() {
         const role = data.role;
 
         if (role === 'admin') {
-          window.location.href = '/dashboard/admin';
+          router.replace('/dashboard/admin');
         } else if (role === 'entreprise') {
-          window.location.href = '/dashboard/entreprise';
+          router.replace('/dashboard/entreprise');
         } else if (role === 'secretaire') {
-          window.location.href = '/dashboard/secretaire';
+          router.replace('/dashboard/secretaire');
         } else {
-          window.location.href = '/connexion';
+          router.replace('/connexion');
         }
       } catch {
-        window.location.href = '/connexion';
+        router.replace('/connexion');
       }
     };
 
     identifyAndRedirect();
-  }, []);
+  }, [router]);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50">
-      <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-      <p className="text-gray-600 font-medium animate-pulse">
-        Vérification de vos accès en cours...
+    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 animate-[fadeSlideIn_0.3s_ease-out]">
+      <div className="relative">
+        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+      <p className="text-slate-500 font-semibold mt-4 text-sm">
+        Vérification de vos accès...
       </p>
     </div>
   );

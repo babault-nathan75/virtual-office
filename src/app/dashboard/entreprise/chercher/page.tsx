@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
 import { useDebounce } from '@/hooks/useDebounce';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 // ============================================================
 // Constantes
@@ -242,6 +243,7 @@ type AIScore = {
 };
 
 export default function ChercherSecretaire() {
+  useDocumentTitle('Trouver une secrétaire');
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [secretaires, setSecretaires] = useState<Secretaire[]>([]);

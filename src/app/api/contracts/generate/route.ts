@@ -1,5 +1,19 @@
 import { NextResponse } from 'next/server';
 import { escapeHtml } from '@/lib/sanitize';
+import { getAuthenticatedUser } from '@/lib/auth';
+import { z } from 'zod';
+import { checkRateLimit } from '@/lib/rateLimit';
+
+const contractSchema = z.object({
+  entrepriseNom: z.string().min(1).max(200),
+  secretaireNom: z.string().min(1).max(200),
+  missionTitre: z.string().min(1).max(200),
+  missionDescription: z.string().max(2000),
+  dateDebut: z.string().min(1),
+  dateFin: z.string().min(1),
+  tarif: z.string().max(100),
+  conditions: z.string().max(2000).optional(),
+});
 
 type ContractData = {
   entrepriseNom: string;
@@ -9,7 +23,7 @@ type ContractData = {
   dateDebut: string;
   dateFin: string;
   tarif: string;
-  conditions: string;
+  conditions?: string;
 };
 
 function generateContractHTML(data: ContractData): string {
@@ -21,7 +35,7 @@ function generateContractHTML(data: ContractData): string {
     dateDebut: escapeHtml(data.dateDebut),
     dateFin: escapeHtml(data.dateFin),
     tarif: escapeHtml(data.tarif),
-    conditions: escapeHtml(data.conditions),
+    conditions: escapeHtml(data.conditions || ''),
   };
   return `
 <!DOCTYPE html>
@@ -131,12 +145,23 @@ function generateContractHTML(data: ContractData): string {
 
 export async function POST(request: Request) {
   try {
-    const data: ContractData = await request.json();
-
-    if (!data.entrepriseNom || !data.secretaireNom || !data.missionTitre) {
-      return NextResponse.json({ error: 'Données manquantes' }, { status: 400 });
+    const user = await getAuthenticatedUser();
+    if (!user) {
+      return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
     }
 
+    const rateLimitResult = await checkRateLimit('contracts', 5, 60000);
+    if (!rateLimitResult.allowed) {
+      return NextResponse.json({ error: 'Trop de requêtes.' }, { status: 429 });
+    }
+
+    const body = await request.json();
+    const parsed = contractSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Données invalides' }, { status: 400 });
+    }
+
+    const data = parsed.data;
     const html = generateContractHTML(data);
 
     return new NextResponse(html, {

@@ -5,6 +5,7 @@ import { KeyboardProvider } from '@/lib/KeyboardContext';
 import { useSessionTimeout } from '@/hooks/useSessionTimeout';
 import CommandPalette from '@/components/CommandPalette';
 import BottomNav from '@/components/BottomNav';
+import Onboarding from '@/components/Onboarding';
 
 function SessionTimeoutWrapper({ children }: { children: React.ReactNode }) {
   useSessionTimeout();
@@ -28,6 +29,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     <KeyboardProvider>
       <SessionTimeoutWrapper>
         <CommandPaletteWrapper />
+        <Onboarding />
         {children}
         <BottomNav />
       </SessionTimeoutWrapper>

@@ -81,9 +81,9 @@ export default function Inscription() {
 
       await supabase.auth.signOut();
       trackEvent('signup_complete', { role });
-      window.location.href = '/connexion?registered=1';
+      router.push('/connexion?registered=1');
     } else {
-      window.location.href = '/connexion';
+      router.push('/connexion');
     }
     setLoading(false);
   };
@@ -144,19 +144,19 @@ export default function Inscription() {
 
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1.5">{role === 'entreprise' ? "Nom de l'entreprise ou du gérant" : 'Prénom(s) et Nom'}</label>
-              <input type="text" {...register('nom')} className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder={role === 'entreprise' ? 'Ex: Tech Solutions' : 'Ex: Marie DUPONT'} />
+              <input type="text" {...register('nom')} className="w-full rounded-xl border border-slate-200 px-4 py-3 bg-slate-50 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent focus:bg-white" placeholder={role === 'entreprise' ? 'Ex: Tech Solutions' : 'Ex: Marie DUPONT'} autoFocus />
               {errors.nom && <p className="text-xs text-red-500 mt-1">{errors.nom.message}</p>}
             </div>
 
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1.5">Numéro de téléphone</label>
-              <input type="tel" {...register('telephone')} className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Ex: +225 01 02 03 04 05" />
+              <input type="tel" {...register('telephone')} className="w-full rounded-xl border border-slate-200 px-4 py-3 bg-slate-50 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent focus:bg-white" placeholder="Ex: +225 01 02 03 04 05" autoComplete="tel" />
               {errors.telephone && <p className="text-xs text-red-500 mt-1">{errors.telephone.message}</p>}
             </div>
 
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1.5">Adresse email</label>
-              <input type="email" {...register('email')} className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="votre@email.com" />
+              <input type="email" {...register('email')} className="w-full rounded-xl border border-slate-200 px-4 py-3 bg-slate-50 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent focus:bg-white" placeholder="votre@email.com" autoComplete="email" />
               {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email.message}</p>}
             </div>
 
@@ -168,7 +168,7 @@ export default function Inscription() {
                 {errors.password && <p className="text-xs text-red-500 mt-1">{errors.password.message}</p>}
               </div>
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Confirmer</label>
+                <label className="block text-sm font-bold text-slate-700 mb-1.5">Confirmer le mot de passe</label>
                 <PasswordInput required {...register('confirmPassword')} placeholder="••••••••" autoComplete="new-password" />
                 {errors.confirmPassword && <p className="text-xs text-red-500 mt-1">{errors.confirmPassword.message}</p>}
               </div>

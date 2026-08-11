@@ -1,8 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import Link from "next/link";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import { ToastContainer } from "@/components/Toast";
 import Providers from "@/components/Providers";
 import { SpeedInsights } from "@vercel/speed-insights/next";
@@ -60,29 +60,31 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="fr">
+    <html lang="fr" className="scroll-smooth">
       <head>
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <link rel="icon" href="/icon.png" type="image/png" sizes="256x256" />
+        <link rel="apple-touch-icon" href="/apple-icon.png" />
+        <link rel="manifest" href="/manifest.json" />
         <OrganizationJsonLd />
         <WebSiteJsonLd />
         {process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN && (
           <script defer data-domain={process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN} src="https://plausible.io/js/script.js" />
         )}
+        <noscript>
+          <style>{`.noscript-hidden { display: none !important; }`}</style>
+        </noscript>
       </head>
         <body className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased selection:bg-blue-500 selection:text-white bg-slate-50 text-slate-900`}>
         <Providers>
+          <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[200] focus:bg-blue-600 focus:text-white focus:px-4 focus:py-2 focus:rounded-lg focus:font-bold focus:shadow-lg">
+            Aller au contenu principal
+          </a>
           <Navbar />
           <ToastContainer />
           <SpeedInsights />
           {children}
-          <footer className="border-t border-slate-100 bg-white py-5 px-4 text-center text-xs text-slate-500 font-medium">
-            <span>© {new Date().getFullYear()} SecrétariatPro</span>
-            <span className="mx-2 text-slate-300">·</span>
-            <Link href="/mentions-legales" className="hover:text-blue-700 transition">Mentions légales</Link>
-            <span className="mx-2 text-slate-300">·</span>
-            <Link href="/cgu" className="hover:text-blue-700 transition">CGU</Link>
-            <span className="mx-2 text-slate-300">·</span>
-            <Link href="/confidentialite" className="hover:text-blue-700 transition">Confidentialité</Link>
-          </footer>
+          <Footer />
         </Providers>
       </body>
     </html>

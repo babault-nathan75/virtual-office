@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
 import { escapeHtml } from '@/lib/sanitize';
+import { z } from 'zod';
+import { checkRateLimit } from '@/lib/rateLimit';
 
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
@@ -12,22 +14,27 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+const notifySchema = z.object({
+  recipientEmail: z.string().email(),
+  recipientName: z.string().max(200).optional(),
+  senderName: z.string().min(1).max(200),
+  messageCount: z.number().int().min(1).max(1000),
+  lastMessage: z.string().max(1000),
+});
+
 export async function POST(request: Request) {
-  let recipientEmail: string, recipientName: string, senderName: string, messageCount: number, lastMessage: string;
-  try {
-    const body = await request.json();
-    recipientEmail = body.recipientEmail;
-    recipientName = body.recipientName;
-    senderName = body.senderName;
-    messageCount = body.messageCount;
-    lastMessage = body.lastMessage;
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  const rateLimitResult = await checkRateLimit('send-msg-notif', 10, 60000);
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json({ error: 'Trop de requêtes.' }, { status: 429 });
   }
 
-  if (!recipientEmail || !senderName) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+  const body = await request.json();
+  const parsed = notifySchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Données invalides' }, { status: 400 });
   }
+
+  const { recipientEmail, recipientName, senderName, messageCount, lastMessage } = parsed.data;
 
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
     console.error('[send-message-notification] SMTP credentials missing');
@@ -77,7 +84,7 @@ SecrétariatPro - Votre secrétariat en ligne
   } catch (mailError: unknown) {
     const errMsg = mailError instanceof Error ? mailError.message : String(mailError);
     console.error('[send-message-notification] SMTP error:', errMsg);
-    return NextResponse.json({ error: 'Failed to send email', details: errMsg }, { status: 500 });
+    return NextResponse.json({ error: 'Erreur lors de l\'envoi' }, { status: 500 });
   }
 
   return NextResponse.json({ success: true });

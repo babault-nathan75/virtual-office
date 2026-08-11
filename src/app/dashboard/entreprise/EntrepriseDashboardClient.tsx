@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
 import { toast } from '@/components/Toast';
+import { ConfirmDialog } from '@/components/ui';
 import NotificationBell from '@/components/NotificationBell';
 import { proposerOffreAction, refuserCandidatureAction, EntrepriseDashboardData } from '@/lib/data/entreprise-client';
 
@@ -24,6 +25,8 @@ export default function EntrepriseDashboardClient({ initialData, userId, userNam
   const [selectedSecretaire, setSelectedSecretaire] = useState<{id: string, nom: string} | null>(null);
   const [detailsProfil, setDetailsProfil] = useState<any>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void; variant?: 'danger' | 'warning' }>({ open: false, title: '', message: '', onConfirm: () => {} });
+  const [confirmLoading, setConfirmLoading] = useState(false);
 
   const refuserCandidature = useCallback(async (missionId: number, candidatureId: number) => {
     setMissions(prev => prev.map(m =>
@@ -43,7 +46,14 @@ export default function EntrepriseDashboardClient({ initialData, userId, userNam
       ));
       setStats(prev => ({ ...prev, enAttente: prev.enAttente + 1 }));
     } else {
-      toast.success('Candidature refusée');
+      toast.undo('Candidature refusée', () => {
+        setMissions(prev => prev.map(m =>
+          m.id === missionId
+            ? { ...m, candidatures: m.candidatures.map(c => c.id === candidatureId ? { ...c, statut: 'en_attente' } : c) }
+            : m
+        ));
+        setStats(prev => ({ ...prev, enAttente: prev.enAttente + 1 }));
+      });
     }
   }, []);
 
@@ -82,7 +92,7 @@ export default function EntrepriseDashboardClient({ initialData, userId, userNam
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-8">
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8 animate-[fadeSlideIn_0.3s_ease-out]">
       <div className="max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
           <div className="flex items-center gap-4">
@@ -114,12 +124,21 @@ export default function EntrepriseDashboardClient({ initialData, userId, userNam
           </div>
         </div>
 
-        <h2 className="text-xl font-bold text-gray-800 mb-6">Vos recrutements en cours</h2>
+        <h2 className="text-xl font-bold text-slate-800 mb-6">Vos recrutements en cours</h2>
 
         {missions.length === 0 ? (
-          <div className="bg-white p-12 text-center rounded-2xl border border-dashed border-gray-300">
-            <p className="text-gray-500">Vous n'avez pas encore publié de mission.</p>
-            <Link href="/dashboard/entreprise/nouvelle-mission" className="text-blue-600 font-bold mt-2 block">Lancer mon premier recrutement &rarr;</Link>
+          <div className="bg-white p-12 text-center rounded-2xl border border-dashed border-slate-300">
+            <div className="w-16 h-16 mx-auto rounded-2xl bg-blue-50 flex items-center justify-center mb-4">
+              <svg className="w-8 h-8 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+              </svg>
+            </div>
+            <p className="text-slate-800 font-bold text-lg mb-1">Aucune mission pour le moment</p>
+            <p className="text-sm text-slate-500 mb-4 max-w-sm mx-auto">Publiez votre première mission pour commencer à recevoir des candidatures de secrétaires qualifiées.</p>
+            <Link href="/dashboard/entreprise/nouvelle-mission" className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition shadow-sm">
+              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
+              Publier une mission
+            </Link>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-8">
@@ -163,14 +182,26 @@ export default function EntrepriseDashboardClient({ initialData, userId, userNam
                             {cand.statut === 'en_attente' && (
                               <div className="flex gap-2">
                                 <button
-                                  onClick={() => proposerOffre(cand.id, secretaire.id, mission.id)}
+                                  onClick={() => setConfirmDialog({
+                                    open: true,
+                                    title: 'Proposer une offre',
+                                    message: `Envoyer une proposition de mission à ${secretaire.nom} ? Il sera notifié de votre offre.`,
+                                    variant: 'warning',
+                                    onConfirm: () => proposerOffre(cand.id, secretaire.id, mission.id),
+                                  })}
                                   aria-label={`Proposer une offre à ${secretaire.nom}`}
                                   className="flex-1 bg-blue-600 text-white text-xs font-extrabold tracking-tight px-3 py-2 rounded-lg hover:bg-blue-700 transition"
                                 >
                                   Proposer une offre
                                 </button>
                                 <button
-                                  onClick={() => refuserCandidature(mission.id, cand.id)}
+                                  onClick={() => setConfirmDialog({
+                                    open: true,
+                                    title: 'Refuser la candidature',
+                                    message: `Êtes-vous sûr de vouloir refuser la candidature de ${secretaire.nom} ? Cette action est irréversible.`,
+                                    variant: 'danger',
+                                    onConfirm: () => refuserCandidature(mission.id, cand.id),
+                                  })}
                                   aria-label={`Refuser la candidature de ${secretaire.nom}`}
                                   className="bg-red-50 text-red-600 text-xs font-bold px-3 py-2 rounded-lg hover:bg-red-100 transition"
                                 >
@@ -277,6 +308,15 @@ export default function EntrepriseDashboardClient({ initialData, userId, userNam
             </div>
           </div>
         )}
+        <ConfirmDialog
+          open={confirmDialog.open}
+          onClose={() => setConfirmDialog(prev => ({ ...prev, open: false }))}
+          onConfirm={() => { setConfirmLoading(true); confirmDialog.onConfirm(); setConfirmLoading(false); setConfirmDialog(prev => ({ ...prev, open: false })); }}
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          variant={confirmDialog.variant}
+          loading={confirmLoading}
+        />
       </div>
     </div>
   );

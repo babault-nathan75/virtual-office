@@ -1,6 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
+const ALLOWED_REDIRECT_PATHS = [
+  '/dashboard/admin',
+  '/dashboard/secretaire',
+  '/dashboard/entreprise',
+  '/connexion',
+];
+
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
@@ -18,7 +25,6 @@ export async function GET(request: Request) {
       const nom = data.user.user_metadata?.full_name || data.user.user_metadata?.name || data.user.email?.split('@')[0] || 'Utilisateur';
       const roleFromMeta = data.user.user_metadata?.role || role;
 
-      // Créer le profil via API (contourne RLS)
       const res = await fetch(`${origin}/api/ensure-profile`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -30,6 +36,10 @@ export async function GET(request: Request) {
       const redirectPath = roleFinal === 'admin' ? '/dashboard/admin'
         : roleFinal === 'secretaire' ? '/dashboard/secretaire'
         : '/dashboard/entreprise';
+
+      if (!ALLOWED_REDIRECT_PATHS.includes(redirectPath)) {
+        return NextResponse.redirect(`${origin}/connexion?error=invalid_redirect`);
+      }
 
       return NextResponse.redirect(`${origin}${redirectPath}`);
     }

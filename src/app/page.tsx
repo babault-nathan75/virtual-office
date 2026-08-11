@@ -29,7 +29,7 @@ export default function Home() {
     <main className="min-h-screen bg-slate-50 flex flex-col items-center font-sans antialiased selection:bg-blue-500 selection:text-white">
       <FAQJsonLd />
 
-      {/* 🌟 SECTION HERO – VISUEL IMPACTANT & TYPOGRAPHIE EMBLÉMATIQUE */}
+      {/* HERO SECTION */}
       <section className="w-full relative py-36 px-4 text-center overflow-hidden flex items-center justify-center min-h-[85vh]">
         {/* Image d'arrière-plan avec traitement colorimétrique professionnel */}
         <div className="absolute inset-0 z-0">
@@ -47,7 +47,7 @@ export default function Home() {
 
         <div className="max-w-5xl mx-auto relative z-10 text-white flex flex-col items-center">
           <span className="bg-gradient-to-r from-blue-500/20 to-indigo-500/20 border border-blue-400/30 text-blue-200 px-4 py-2 rounded-full text-xs font-bold tracking-widest uppercase mb-8 inline-block backdrop-blur-md shadow-sm">
-            🚀 La 1ère plateforme de secrétariat en ligne
+            La 1ère plateforme de secrétariat en ligne
           </span>
 
           <h1 className="text-4xl sm:text-5xl md:text-7xl font-black tracking-tight mb-8 leading-[1.1] text-white drop-shadow-[0_4px_12px_rgba(0,0,0,0.5)]">
@@ -67,8 +67,8 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 🔄 SECTION "COMMENT ÇA MARCHE" – DESIGN ÉPURÉ ETÉLÉGANT */}
-      <section className="w-full max-w-6xl mx-auto py-24 px-4 -mt-20 relative z-20">
+      {/* HOW IT WORKS SECTION */}
+      <section id="comment-ca-marche" className="w-full max-w-6xl mx-auto py-24 px-4 -mt-20 relative z-20">
         <div className="bg-white/95 backdrop-blur-md p-8 md:p-16 rounded-3xl shadow-[0_30px_60px_-15px_rgba(0,0,0,0.08)] border border-slate-100">
           <h2 className="text-3xl md:text-4xl font-black text-center text-slate-900 tracking-tight mb-4">
             Une collaboration simple et rapide
@@ -90,21 +90,27 @@ export default function Home() {
                 </h3>
                 <ul className="space-y-8">
                   <li className="flex gap-5 group">
-                    <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl font-semibold transition-colors group-hover:bg-blue-600 group-hover:text-white">📝</div>
+                    <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center transition-colors group-hover:bg-blue-600 group-hover:text-white">
+                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                    </div>
                     <div>
                       <h4 className="font-extrabold text-slate-900 text-base mb-1 tracking-tight">Publiez votre besoin</h4>
                       <p className="text-slate-600 text-sm leading-relaxed font-medium">Décrivez précisément vos tâches (saisie, gestion d'appels, mails) et la durée estimée.</p>
                     </div>
                   </li>
                   <li className="flex gap-5 group">
-                    <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl font-semibold transition-colors group-hover:bg-blue-600 group-hover:text-white">📬</div>
+                    <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center transition-colors group-hover:bg-blue-600 group-hover:text-white">
+                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                    </div>
                     <div>
                       <h4 className="font-extrabold text-slate-900 text-base mb-1 tracking-tight">Recevez des candidatures</h4>
                       <p className="text-slate-600 text-sm leading-relaxed font-medium">Consultez en temps réel les profils, portfolios et tarifs des secrétaires disponibles.</p>
                     </div>
                   </li>
                   <li className="flex gap-5 group">
-                    <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl font-semibold transition-colors group-hover:bg-blue-600 group-hover:text-white">🤝</div>
+                    <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center transition-colors group-hover:bg-blue-600 group-hover:text-white">
+                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                    </div>
                     <div>
                       <h4 className="font-extrabold text-slate-900 text-base mb-1 tracking-tight">Validez et travaillez</h4>
                       <p className="text-slate-600 text-sm leading-relaxed font-medium">Sélectionnez le profil idéal. Notre processus sécurise la contractualisation.</p>
@@ -125,21 +131,27 @@ export default function Home() {
                 </h3>
                 <ul className="space-y-8">
                   <li className="flex gap-5 group">
-                    <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl font-semibold transition-colors group-hover:bg-emerald-600 group-hover:text-white">👤</div>
+                    <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center transition-colors group-hover:bg-emerald-600 group-hover:text-white">
+                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                    </div>
                     <div>
                       <h4 className="font-extrabold text-slate-900 text-base mb-1 tracking-tight">Créez votre vitrine</h4>
                       <p className="text-slate-600 text-sm leading-relaxed font-medium">Mettez en valeur vos expertises métiers, vos expériences passées et fixez vos tarifs.</p>
                     </div>
                   </li>
                   <li className="flex gap-5 group">
-                    <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl font-semibold transition-colors group-hover:bg-emerald-600 group-hover:text-white">🔍</div>
+                    <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center transition-colors group-hover:bg-emerald-600 group-hover:text-white">
+                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                    </div>
                     <div>
                       <h4 className="font-extrabold text-slate-900 text-base mb-1 tracking-tight">Trouvez des missions de choix</h4>
                       <p className="text-slate-600 text-sm leading-relaxed font-medium">Parcourez les demandes des entreprises et postulez instantanément aux offres.</p>
                     </div>
                   </li>
                   <li className="flex gap-5 group">
-                    <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl font-semibold transition-colors group-hover:bg-emerald-600 group-hover:text-white">💰</div>
+                    <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center transition-colors group-hover:bg-emerald-600 group-hover:text-white">
+                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    </div>
                     <div>
                       <h4 className="font-extrabold text-slate-900 text-base mb-1 tracking-tight">Développez votre activité</h4>
                       <p className="text-slate-600 text-sm leading-relaxed font-medium">Une fois validée, collaborez directement et bénéficiez de paiements garantis.</p>
@@ -153,8 +165,8 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 🛡️ SECTION AVANTAGES – ESTHÉTIQUE ÉDITORIALE */}
-      <section className="w-full bg-gradient-to-b from-slate-50 to-blue-50/40 py-24 px-4">
+      {/* ADVANTAGES SECTION */}
+      <section id="avantages" className="w-full bg-gradient-to-b from-slate-50 to-blue-50/40 py-24 px-4">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-20">
             <h2 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight mb-4">
@@ -165,19 +177,25 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="bg-white p-8 rounded-2xl shadow-[0_15px_30px_rgba(0,0,0,0.02)] border border-slate-100 hover:shadow-[0_20px_40px_rgba(0,0,0,0.05)] hover:-translate-y-1 transition-all duration-300">
-              <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center text-2xl mb-6 shadow-inner">⏱️</div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 stagger-children">
+            <div className="bg-white p-8 rounded-2xl shadow-[0_15px_30px_rgba(0,0,0,0.02)] border border-slate-100 card-hover">
+              <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-6 shadow-inner">
+                <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+              </div>
               <h3 className="text-xl font-extrabold text-slate-900 tracking-tight mb-3">Flexibilité absolue</h3>
-              <p className="text-slate-600 text-sm font-medium leading-relaxed">À la tâche, à la semaine ou au mois. Adaptez instantanément vos ressources à vos pics d'activité.</p>
+              <p className="text-slate-600 text-sm font-medium leading-relaxed">À la tâche, à la semaine ou au mois. Adaptez instantanément vos ressources à vos pics d&apos;activité.</p>
             </div>
-            <div className="bg-white p-8 rounded-2xl shadow-[0_15px_30px_rgba(0,0,0,0.02)] border border-slate-100 hover:shadow-[0_20px_40px_rgba(0,0,0,0.05)] hover:-translate-y-1 transition-all duration-300">
-              <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center text-2xl mb-6 shadow-inner">🔒</div>
+            <div className="bg-white p-8 rounded-2xl shadow-[0_15px_30px_rgba(0,0,0,0.02)] border border-slate-100 card-hover">
+              <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-6 shadow-inner">
+                <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+              </div>
               <h3 className="text-xl font-extrabold text-slate-900 tracking-tight mb-3">Sécurité & Confidentialité</h3>
-              <p className="text-slate-600 text-sm font-medium leading-relaxed">Les données et coordonnées restent chiffrées et protégées jusqu'à validation bilatérale du contrat.</p>
+              <p className="text-slate-600 text-sm font-medium leading-relaxed">Les données et coordonnées restent chiffrées et protégées jusqu&apos;à validation bilatérale du contrat.</p>
             </div>
-            <div className="bg-white p-8 rounded-2xl shadow-[0_15px_30px_rgba(0,0,0,0.02)] border border-slate-100 hover:shadow-[0_20px_40px_rgba(0,0,0,0.05)] hover:-translate-y-1 transition-all duration-300">
-              <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center text-2xl mb-6 shadow-inner">💼</div>
+            <div className="bg-white p-8 rounded-2xl shadow-[0_15px_30px_rgba(0,0,0,0.02)] border border-slate-100 card-hover">
+              <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-6 shadow-inner">
+                <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+              </div>
               <h3 className="text-xl font-extrabold text-slate-900 tracking-tight mb-3">Zéro charges fixes</h3>
               <p className="text-slate-600 text-sm font-medium leading-relaxed">Oubliez la complexité juridique des embauches. Payez exclusivement le travail opérationnel accompli.</p>
             </div>
@@ -185,7 +203,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 🚀 BANNIÈRE FINALE – APPEL À L'ACTION RADICAL */}
+      {/* CTA BANNER */}
       <section className="w-full bg-slate-950 text-white py-24 px-4 text-center relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_left,rgba(59,130,246,0.1),transparent_40%)]"></div>
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.08),transparent_40%)]"></div>

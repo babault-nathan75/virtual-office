@@ -43,7 +43,7 @@ function generateDigestHTML(userName: string, stats: { messages: number; unread:
     <h1 style="color: #2563eb; font-size: 22px;">📊 Résumé hebdomadaire</h1>
     <p style="color: #64748b; font-size: 12px;">SecrétariatPro</p>
   </div>
-  <p>Bonjour <strong>${userName}</strong>,</p>
+  <p>Bonjour <strong>${userName.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong>,</p>
   <p>Voici le résumé de votre activité cette semaine :</p>
   <div style="background: #f8fafc; border-radius: 12px; padding: 20px; margin: 20px 0;">
     <div style="display: flex; justify-content: space-around; text-align: center;">

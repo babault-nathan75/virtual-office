@@ -3,6 +3,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { rateLimit } from '@/lib/rateLimit';
+import { getAuthenticatedUser } from '@/lib/auth';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? '');
 
@@ -25,6 +26,11 @@ const BodySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
+  }
+
   const ip = req.headers.get('x-forwarded-for') ?? 'anonymous';
   const { allowed } = rateLimit(`match-mission:${ip}`, 10, 60_000);
   if (!allowed) {

@@ -55,8 +55,8 @@ describe('inscriptionSchema', () => {
       nom: 'Test User',
       email: 'test@test.com',
       telephone: '+22501020304',
-      password: '123456',
-      confirmPassword: '123456',
+      password: 'Secret123!',
+      confirmPassword: 'Secret123!',
       role: 'secretaire',
     });
     expect(result.success).toBe(true);

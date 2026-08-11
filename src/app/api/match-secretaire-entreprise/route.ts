@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
 import { rateLimit } from '@/lib/rateLimit';
+import { getAuthenticatedUser } from '@/lib/auth';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? '');
 
@@ -32,6 +33,11 @@ const FiltersSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
+  }
+
   const ip = req.headers.get('x-forwarded-for') ?? 'anonymous';
   const { allowed, remaining } = rateLimit(`match-entreprise:${ip}`, 10, 60_000);
   if (!allowed) {

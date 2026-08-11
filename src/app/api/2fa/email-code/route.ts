@@ -1,23 +1,37 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
+import crypto from 'crypto';
 import { getAuthenticatedUser } from '@/lib/auth';
+import { z } from 'zod';
+import { checkRateLimit } from '@/lib/rateLimit';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-export async function POST(request: Request) {
-  const { userId } = await request.json();
+const emailCodeSchema = z.object({
+  userId: z.string().uuid(),
+});
 
-  if (!userId) {
-    return NextResponse.json({ error: 'Missing userId' }, { status: 400 });
+export async function POST(request: Request) {
+  const rateLimitResult = await checkRateLimit('2fa-email-code', 3);
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json({ error: 'Trop de requêtes. Réessayez dans 5 minutes.' }, { status: 429 });
   }
 
+  const body = await request.json();
+  const parsed = emailCodeSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Données invalides' }, { status: 400 });
+  }
+
+  const { userId } = parsed.data;
+
   const user = await getAuthenticatedUser();
-  if (user && user.id !== userId) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!user || user.id !== userId) {
+    return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
   }
 
   const { data: tfa } = await supabaseAdmin
@@ -40,7 +54,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Email not found' }, { status: 400 });
   }
 
-  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const code = String(crypto.randomInt(100000, 999999));
   const expires = Date.now() + 10 * 60 * 1000;
 
   await supabaseAdmin

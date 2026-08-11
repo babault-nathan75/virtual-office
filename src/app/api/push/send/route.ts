@@ -2,6 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import webPush from 'web-push';
 import { requireAuth } from '@/lib/auth';
+import { checkRateLimit } from '@/lib/rateLimit';
+import { z } from 'zod';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -16,30 +18,42 @@ if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
   );
 }
 
+const pushSchema = z.object({
+  userId: z.string().uuid(),
+  title: z.string().min(1).max(200),
+  body: z.string().min(1).max(500),
+  url: z.string().max(500).optional(),
+});
+
 export async function POST(request: Request) {
-  try {
-    await requireAuth();
-  } catch {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const rateLimitResult = await checkRateLimit('push-send', 10, 60000);
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json({ error: 'Trop de requêtes' }, { status: 429 });
   }
 
-  let userId: string, title: string, body: string, url: string;
+  let user;
   try {
-    const bodyReq = await request.json();
-    userId = bodyReq.userId;
-    title = bodyReq.title;
-    body = bodyReq.body;
-    url = bodyReq.url || '/dashboard/messages';
+    user = await requireAuth();
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
   }
 
-  if (!userId || !title) {
-    return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Corps de requête invalide' }, { status: 400 });
   }
+
+  const parsed = pushSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Paramètres invalides' }, { status: 400 });
+  }
+
+  const { userId, title, body: pushBody, url } = parsed.data;
 
   if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
-    return NextResponse.json({ error: 'Push not configured' }, { status: 503 });
+    return NextResponse.json({ error: 'Push non configuré' }, { status: 503 });
   }
 
   const { data: subs } = await supabaseAdmin
@@ -51,7 +65,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, skipped: true });
   }
 
-  const payload = JSON.stringify({ title, body, url });
+  const payload = JSON.stringify({ title, body: pushBody, url: url || '/dashboard/messages' });
   const results = [];
 
   for (const sub of subs) {
@@ -60,7 +74,7 @@ export async function POST(request: Request) {
         { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
         payload
       );
-      results.push({ endpoint: sub.endpoint, sent: true });
+      results.push({ sent: true });
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       if (errMsg.includes('410') || errMsg.includes('404')) {
@@ -69,7 +83,7 @@ export async function POST(request: Request) {
           .delete()
           .eq('endpoint', sub.endpoint);
       }
-      results.push({ endpoint: sub.endpoint, sent: false, error: errMsg });
+      results.push({ sent: false });
     }
   }
 

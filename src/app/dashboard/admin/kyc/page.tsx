@@ -96,6 +96,10 @@ export default function AdminKycPage() {
 
   const handleReject = async () => {
     if (!rejectModal) return;
+    if (!rejectReason.trim()) {
+      toast.error('Veuillez saisir un motif de rejet.');
+      return;
+    }
     setActing(rejectModal);
 
     const { error } = await supabase
@@ -314,19 +318,27 @@ export default function AdminKycPage() {
       {rejectModal !== null && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[101]" onClick={() => setRejectModal(null)}>
           <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
-            <h3 className="font-black text-slate-900 mb-3">Raison du refus</h3>
+            <h3 className="font-black text-slate-900 mb-1">Raison du refus</h3>
+            <p className="text-xs text-slate-500 mb-3">Ce motif sera transmis à l&apos;utilisateur pour qu&apos;il puisse corriger son dossier.</p>
             <textarea
               value={rejectReason}
               onChange={e => setRejectReason(e.target.value)}
               rows={3}
-              placeholder="Document illisible, photo floue..."
+              placeholder="Ex: Document illisible, photo floue, informations non conformes..."
               className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-red-500 transition resize-none"
             />
+            {!rejectReason.trim() && (
+              <p className="text-xs text-red-500 mt-1 font-medium">Le motif est obligatoire</p>
+            )}
             <div className="flex gap-3 mt-4">
               <button onClick={() => { setRejectModal(null); setRejectReason(''); }} className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-sm hover:bg-slate-200 transition">
                 Annuler
               </button>
-              <button onClick={handleReject} className="flex-1 py-2.5 rounded-xl bg-red-600 text-white font-bold text-sm hover:bg-red-700 transition">
+              <button
+                onClick={handleReject}
+                disabled={!rejectReason.trim()}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 text-white font-bold text-sm hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
                 Confirmer le refus
               </button>
             </div>

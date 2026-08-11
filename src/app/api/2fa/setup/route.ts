@@ -2,27 +2,38 @@ import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import * as OTPAuth from 'otpauth';
 import QRCode from 'qrcode';
+import crypto from 'crypto';
 import { getAuthenticatedUser } from '@/lib/auth';
+import { z } from 'zod';
+import { checkRateLimit } from '@/lib/rateLimit';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-export async function POST(request: Request) {
-  const { userId, method } = await request.json();
+const setupSchema = z.object({
+  userId: z.string().uuid(),
+  method: z.enum(['totp', 'email']),
+});
 
-  if (!userId || !method) {
-    return NextResponse.json({ error: 'Missing userId or method' }, { status: 400 });
+export async function POST(request: Request) {
+  const rateLimitResult = await checkRateLimit('2fa-setup', 5, 60000);
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json({ error: 'Trop de requêtes. Réessayez plus tard.' }, { status: 429 });
   }
+
+  const body = await request.json();
+  const parsed = setupSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Données invalides' }, { status: 400 });
+  }
+
+  const { userId, method } = parsed.data;
 
   const user = await getAuthenticatedUser();
-  if (user && user.id !== userId) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
-
-  if (method !== 'totp' && method !== 'email') {
-    return NextResponse.json({ error: 'Invalid method' }, { status: 400 });
+  if (!user || user.id !== userId) {
+    return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
   }
 
   const { data: existing } = await supabaseAdmin
@@ -59,7 +70,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ qrData, method: 'totp' });
   }
 
-  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const code = String(crypto.randomInt(100000, 999999));
 
   await supabaseAdmin.from('two_factor_auth').upsert({
     user_id: userId,

@@ -1,22 +1,39 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
+import { z } from 'zod';
+import { checkRateLimit } from '@/lib/rateLimit';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-export async function POST(request: Request) {
-  const { userId, nom, role, emailConfirmed, email } = await request.json();
+const ensureProfileSchema = z.object({
+  userId: z.string().uuid(),
+  nom: z.string().min(1).max(200).optional(),
+  role: z.enum(['entreprise', 'secretaire', 'admin']),
+  emailConfirmed: z.boolean().optional(),
+  email: z.string().email().optional(),
+});
 
-  if (!userId || !role) {
-    return NextResponse.json({ error: 'Missing userId or role' }, { status: 400 });
+export async function POST(request: Request) {
+  const rateLimitResult = await checkRateLimit('ensure-profile', 5, 60000);
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json({ error: 'Trop de requêtes.' }, { status: 429 });
   }
 
+  const body = await request.json();
+  const parsed = ensureProfileSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Données invalides' }, { status: 400 });
+  }
+
+  const { userId, nom, role, emailConfirmed, email } = parsed.data;
+
   const user = await getAuthenticatedUser();
-  if (user && user.id !== userId) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!user || user.id !== userId) {
+    return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
   }
 
   const { data: existing } = await supabaseAdmin
@@ -67,7 +84,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ role: existingProf?.role || role });
     }
     console.error('[ensure-profile] Insert error:', JSON.stringify(error));
-    return NextResponse.json({ role, error: error.message }, { status: 500 });
+    return NextResponse.json({ role, error: 'Erreur serveur' }, { status: 500 });
   }
 
   return NextResponse.json({ role: data?.role || role });

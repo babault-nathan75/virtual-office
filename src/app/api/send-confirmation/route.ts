@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { escapeHtml } from '@/lib/sanitize';
+import { z } from 'zod';
+import { checkRateLimit } from '@/lib/rateLimit';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -19,20 +21,25 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+const confirmSchema = z.object({
+  userId: z.string().uuid(),
+  email: z.string().email(),
+  nom: z.string().max(200).optional(),
+});
+
 export async function POST(request: Request) {
-  let userId: string, email: string, nom: string;
-  try {
-    const body = await request.json();
-    userId = body.userId;
-    email = body.email;
-    nom = body.nom;
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  const rateLimitResult = await checkRateLimit('send-confirmation', 3, 300000);
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json({ error: 'Trop de requêtes. Réessayez dans 5 minutes.' }, { status: 429 });
   }
 
-  if (!userId || !email) {
-    return NextResponse.json({ error: 'Missing userId or email' }, { status: 400 });
+  const body = await request.json();
+  const parsed = confirmSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Données invalides' }, { status: 400 });
   }
+
+  const { userId, email, nom } = parsed.data;
 
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
     console.error('[send-confirmation] SMTP credentials missing');
@@ -52,10 +59,16 @@ export async function POST(request: Request) {
 
   if (tokenError) {
     console.error('[send-confirmation] Token insert error:', tokenError.message, tokenError.code);
-    return NextResponse.json({ error: tokenError.message, code: tokenError.code }, { status: 500 });
+    return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
   }
 
-  const origin = request.headers.get('origin') || 'http://localhost:3000';
+  const allowedOrigins = [
+    'https://secretariatpro-drab.vercel.app',
+    'http://localhost:3000',
+    'http://localhost:3001',
+  ];
+  const requestOrigin = request.headers.get('origin') || '';
+  const origin = allowedOrigins.includes(requestOrigin) ? requestOrigin : allowedOrigins[0];
   const confirmUrl = `${origin}/api/confirm-email?token=${token}`;
 
   try {

@@ -74,8 +74,8 @@ export default function DetailedRating({ targetUserId, missionId, onRated }: Pro
     return (
       <div className="text-center py-8">
         <div className="text-4xl mb-3">🙏</div>
-        <p className="font-bold text-slate-900 dark:text-white">Merci pour votre évaluation !</p>
-        <p className="text-sm text-slate-500 dark:text-gray-400 mt-1">Votre avis aide la communauté.</p>
+        <p className="font-bold text-slate-900">Merci pour votre évaluation !</p>
+        <p className="text-sm text-slate-500 mt-1">Votre avis aide la communauté.</p>
       </div>
     );
   }
@@ -83,22 +83,22 @@ export default function DetailedRating({ targetUserId, missionId, onRated }: Pro
   return (
     <div className="space-y-5">
       <div className="text-center">
-        <p className="text-2xl font-black text-slate-900 dark:text-white">{average}</p>
-        <p className="text-xs text-slate-400 dark:text-gray-500">Note moyenne</p>
+        <p className="text-2xl font-black text-slate-900">{average}</p>
+        <p className="text-xs text-slate-400">Note moyenne</p>
       </div>
 
       <div className="space-y-3">
         {CRITERIA.map(c => (
           <div key={c.key} className="flex items-center gap-3">
             <span className="text-lg w-8">{c.icon}</span>
-            <span className="text-sm font-medium text-slate-700 dark:text-gray-300 w-36">{c.label}</span>
+            <span className="text-sm font-medium text-slate-700 w-36">{c.label}</span>
             <div className="flex gap-1">
               {[1, 2, 3, 4, 5].map(star => (
                 <button
                   key={star}
                   type="button"
                   onClick={() => setRatings(prev => ({ ...prev, [c.key]: star }))}
-                  className={`text-xl transition ${star <= ratings[c.key] ? 'text-amber-400 scale-110' : 'text-slate-200 dark:text-gray-600 hover:text-amber-300'}`}
+                  className={`text-xl transition ${star <= ratings[c.key] ? 'text-amber-400 scale-110' : 'text-slate-200 hover:text-amber-300'}`}
                 >
                   ★
                 </button>
@@ -113,7 +113,7 @@ export default function DetailedRating({ targetUserId, missionId, onRated }: Pro
         onChange={e => setComment(e.target.value)}
         placeholder="Commentaire optionnel..."
         rows={3}
-        className="w-full rounded-xl border border-slate-200 dark:border-gray-600 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-slate-900 dark:text-white resize-none"
+        className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 text-slate-900 resize-none"
       />
 
       <button

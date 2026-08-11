@@ -1,31 +1,38 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
+import { z } from 'zod';
+import { checkRateLimit } from '@/lib/rateLimit';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+const subscribeSchema = z.object({
+  userId: z.string().uuid(),
+  endpoint: z.string().url(),
+  p256dh: z.string().min(1),
+  auth: z.string().min(1),
+});
+
 export async function POST(request: Request) {
-  let userId: string, endpoint: string, p256dh: string, authKey: string;
-  try {
-    const body = await request.json();
-    userId = body.userId;
-    endpoint = body.endpoint;
-    p256dh = body.p256dh;
-    authKey = body.auth;
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  const rateLimitResult = await checkRateLimit('push-subscribe', 5, 60000);
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json({ error: 'Trop de requêtes.' }, { status: 429 });
   }
 
-  if (!userId || !endpoint || !p256dh || !authKey) {
-    return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
+  const body = await request.json();
+  const parsed = subscribeSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Données invalides' }, { status: 400 });
   }
+
+  const { userId, endpoint, p256dh, auth: authKey } = parsed.data;
 
   const user = await getAuthenticatedUser();
-  if (user && user.id !== userId) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!user || user.id !== userId) {
+    return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
   }
 
   const { error } = await supabaseAdmin
@@ -38,7 +45,8 @@ export async function POST(request: Request) {
     }, { onConflict: 'user_id,endpoint' });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('[push/subscribe] Error:', error.message);
+    return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
   }
 
   return NextResponse.json({ success: true });

@@ -4,6 +4,9 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
+import { Breadcrumbs } from '@/components/ui';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { exportToCSV, exportToPDF } from '@/lib/export';
 import { SkeletonStats } from '@/components/Skeleton';
 
 type Stats = {
@@ -84,26 +87,59 @@ export default function AdminStatsPage() {
   }, [router]);
 
   if (loading) return (
-    <div className="min-h-screen bg-slate-50 dark:bg-gray-900 p-8">
+    <div className="min-h-screen bg-slate-50 p-8">
       <div className="max-w-5xl mx-auto space-y-8">
-        <div className="h-8 bg-slate-200 dark:bg-gray-700 rounded animate-pulse w-48" />
+        <div className="h-8 bg-slate-200 rounded animate-pulse w-48" />
         <SkeletonStats />
-        <div className="h-64 bg-white dark:bg-gray-800 rounded-2xl border border-slate-100 dark:border-gray-700 p-6">
-          <div className="h-4 bg-slate-200 dark:bg-gray-700 rounded animate-pulse w-32 mb-4" />
-          <div className="h-40 bg-slate-100 dark:bg-gray-700 rounded animate-pulse" />
+        <div className="h-64 bg-white rounded-2xl border border-slate-100 p-6">
+          <div className="h-4 bg-slate-200 rounded animate-pulse w-32 mb-4" />
+          <div className="h-40 bg-slate-100 rounded animate-pulse" />
         </div>
       </div>
     </div>
   );
   if (!stats) return null;
 
+  useDocumentTitle('Statistiques');
+
   const maxDaily = Math.max(...stats.dailyActivity.map(d => d.count), 1);
 
+  const handleExportCSV = () => {
+    const data = stats.dailyActivity.map(d => ({
+      Date: d.date,
+      Messages: d.count,
+    }));
+    exportToCSV(data, 'stats_messages');
+  };
+
+  const handleExportPDF = () => {
+    const data = stats.dailyActivity.map(d => ({
+      Date: d.date,
+      Messages: d.count,
+    }));
+    exportToPDF('Statistiques des messages', data, 'stats_messages');
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans antialiased">
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans antialiased animate-[fadeSlideIn_0.3s_ease-out]">
       <div className="max-w-5xl mx-auto">
-        <Link href="/dashboard/admin" className="inline-flex items-center text-sm font-bold text-blue-600 hover:text-blue-800 mb-4 transition">← Console d&apos;administration</Link>
-        <h1 className="text-3xl font-black tracking-tight text-slate-900 mb-6">Statistiques des Discussions</h1>
+        <Breadcrumbs items={[
+          { label: 'Administration', href: '/dashboard/admin' },
+          { label: 'Statistiques' },
+        ]} />
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-3xl font-black tracking-tight text-slate-900">Statistiques des Discussions</h1>
+          <div className="flex gap-2">
+            <button onClick={handleExportCSV} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-slate-600 bg-white border border-slate-200 hover:border-blue-300 hover:bg-blue-50 transition">
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              CSV
+            </button>
+            <button onClick={handleExportPDF} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-slate-600 bg-white border border-slate-200 hover:border-blue-300 hover:bg-blue-50 transition">
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+              PDF
+            </button>
+          </div>
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">

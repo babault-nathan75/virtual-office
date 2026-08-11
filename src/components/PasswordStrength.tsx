@@ -20,11 +20,11 @@ export default function PasswordStrength({ password }: { password: string }) {
   const width = `${(score / 5) * 100}%`;
 
   return (
-    <div className="mt-1.5" role="status" aria-label={`Force du mot de passe : ${label}`}>
+    <div className="mt-2 animate-[fadeSlideIn_0.2s_ease-out]" role="status" aria-label={`Force du mot de passe : ${label}`}>
       <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-        <div className={`h-1.5 rounded-full transition-all duration-300 ${color}`} style={{ width }} />
+        <div className={`h-1.5 rounded-full transition-all duration-500 ease-out ${color}`} style={{ width }} />
       </div>
-      <p className={`text-[11px] font-bold mt-0.5 ${
+      <p className={`text-[11px] font-bold mt-1 transition-colors duration-300 ${
         score <= 1 ? 'text-red-600' : score <= 2 ? 'text-amber-600' : score <= 3 ? 'text-blue-600' : 'text-emerald-600'
       }`}>
         {label}

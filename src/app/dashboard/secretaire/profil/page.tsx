@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
-import { Button, Card } from '@/components/ui';
+import { Button, Card, Breadcrumbs } from '@/components/ui';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 // ============================================================
 // Données des QCM (listes de choix)
@@ -306,15 +307,15 @@ export default function ProfilSecretaire() {
 
   // ----- Render --------------------------------------------------------------
 
+  useDocumentTitle('Mon profil');
+
   return (
     <main className="min-h-screen bg-slate-50 py-12 px-4 font-sans antialiased">
       <div className="max-w-3xl mx-auto">
-        <Link
-          href="/dashboard/secretaire"
-          className="inline-flex items-center text-sm font-bold text-blue-600 hover:text-blue-800 mb-6 transition"
-        >
-          ← Retour au tableau de bord
-        </Link>
+        <Breadcrumbs items={[
+          { label: 'Tableau de bord', href: '/dashboard/secretaire' },
+          { label: 'Mon profil' },
+        ]} />
 
         <div className="bg-white rounded-3xl border border-slate-100 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.08)] overflow-hidden">
 

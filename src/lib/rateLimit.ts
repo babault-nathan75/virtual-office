@@ -23,7 +23,7 @@ export const rateLimiter = redis
     })
   : null;
 
-export async function checkRateLimit(identifier: string): Promise<{ allowed: boolean; remaining: number }> {
+export async function checkRateLimit(identifier: string, limit = 10, windowMs = 60000): Promise<{ allowed: boolean; remaining: number }> {
   if (rateLimiter) {
     const result = await rateLimiter.limit(identifier);
     return { allowed: result.success, remaining: result.remaining };
@@ -32,11 +32,11 @@ export async function checkRateLimit(identifier: string): Promise<{ allowed: boo
   const now = Date.now();
   const entry = memoryStore.get(identifier);
   if (!entry || now > entry.resetAt) {
-    memoryStore.set(identifier, { count: 1, resetAt: now + 60_000 });
-    return { allowed: true, remaining: 9 };
+    memoryStore.set(identifier, { count: 1, resetAt: now + windowMs });
+    return { allowed: true, remaining: limit - 1 };
   }
   entry.count++;
-  return { allowed: entry.count <= 10, remaining: Math.max(0, 10 - entry.count) };
+  return { allowed: entry.count <= limit, remaining: Math.max(0, limit - entry.count) };
 }
 
 // Backward-compatible rateLimit function for existing API routes

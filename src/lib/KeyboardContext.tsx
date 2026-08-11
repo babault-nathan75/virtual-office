@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 
-type ShortcutAction = 'search' | 'newMessage' | 'toggleTheme' | 'escape' | 'send';
+export type ShortcutAction = 'search' | 'newMessage' | 'newMission' | 'messages' | 'help' | 'escape' | 'send';
 
 const KeyboardContext = createContext<{
   registerShortcut: (action: ShortcutAction, handler: () => void) => void;
@@ -32,9 +32,17 @@ export function KeyboardProvider({ children }: { children: React.ReactNode }) {
         e.preventDefault();
         handlers.get('newMessage')?.();
       }
-      if (isMeta && e.shiftKey && e.key === 'T') {
+      if (isMeta && e.key === 'e') {
         e.preventDefault();
-        handlers.get('toggleTheme')?.();
+        handlers.get('newMission')?.();
+      }
+      if (isMeta && e.key === 'm') {
+        e.preventDefault();
+        handlers.get('messages')?.();
+      }
+      if (e.key === '?' && !isMeta && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+        e.preventDefault();
+        handlers.get('help')?.();
       }
       if (e.key === 'Escape') {
         handlers.get('escape')?.();

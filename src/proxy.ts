@@ -1,6 +1,13 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+const ALLOWED_ORIGINS = [
+  process.env.NEXT_PUBLIC_SUPABASE_URL ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin : '',
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'https://secretariatpro-drab.vercel.app',
+].filter(Boolean);
+
 export async function proxy(request: NextRequest) {
   try {
     return await proxyHandler(request);
@@ -40,14 +47,39 @@ async function proxyHandler(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
-  // CSRF protection pour les API POST
-  if (pathname.startsWith('/api/') && request.method === 'POST') {
+  // Block path traversal attempts
+  if (pathname.includes('..') || pathname.includes('%2e%2e')) {
+    return NextResponse.json({ error: 'Chemin invalide' }, { status: 400 });
+  }
+
+  // CSRF protection for all API mutations
+  if (pathname.startsWith('/api/') && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(request.method)) {
     const origin = request.headers.get('origin');
     const host = request.headers.get('host');
-    if (origin && host && !origin.includes(host)) {
-      console.warn(`[CSRF] Requête bloquée: origin=${origin} host=${host}`);
-      return NextResponse.json({ error: 'Requête non autorisée' }, { status: 403 });
+
+    if (origin && host) {
+      const originHost = new URL(origin).hostname;
+      const allowed = ALLOWED_ORIGINS.some(o => {
+        try { return new URL(o).hostname === originHost; } catch { return false; }
+      });
+      if (!allowed && originHost !== host) {
+        console.warn(`[CSRF] Blocked: origin=${origin} host=${host} path=${pathname}`);
+        return NextResponse.json({ error: 'Requête non autorisée' }, { status: 403 });
+      }
     }
+  }
+
+  // Block non-GET/HEAD/POST methods on read-only API routes
+  if (pathname.startsWith('/api/') && !['GET', 'HEAD', 'POST', 'OPTIONS'].includes(request.method)) {
+    if (!pathname.startsWith('/api/admin/') && !pathname.startsWith('/api/messages/')) {
+      return NextResponse.json({ error: 'Méthode non autorisée' }, { status: 405 });
+    }
+  }
+
+  // Rate limiting headers for API routes
+  if (pathname.startsWith('/api/')) {
+    supabaseResponse.headers.set('X-Content-Type-Options', 'nosniff');
+    supabaseResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
   }
 
   // Routes publiques — pas besoin d'auth

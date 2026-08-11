@@ -35,6 +35,29 @@ jobs:
       - run: npm ci
       - run: npm run test
 
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - name: Check for secrets in code
+        run: |
+          if grep -r "sk_live_\|sk_test_\|password.*=.*['\"]" src/ --include="*.ts" --include="*.tsx" --include="*.js" 2>/dev/null; then
+            echo "WARNING: Potential secrets found in code"
+            exit 1
+          fi
+      - name: Verify RLS migration exists
+        run: |
+          if [ ! -f "supabase/migrations/003_rls_all_tables.sql" ]; then
+            echo "ERROR: RLS migration missing"
+            exit 1
+          fi
+
   e2e:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
@@ -62,7 +85,7 @@ jobs:
   preview:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-    needs: [lint-and-build, test]
+    needs: [lint-and-build, test, security-audit]
     steps:
       - uses: actions/checkout@v4
       - uses: amondnet/vercel-action@v25
