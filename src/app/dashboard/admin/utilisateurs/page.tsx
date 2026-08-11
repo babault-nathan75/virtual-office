@@ -12,6 +12,7 @@ type Profil = {
   telephone: string | null;
   role: 'entreprise' | 'secretaire' | 'admin';
   created_at: string;
+  specialite?: string | null;
 };
 
 const ROLES: Profil['role'][] = ['entreprise', 'secretaire', 'admin'];
@@ -59,7 +60,22 @@ export default function GestionUtilisateurs() {
         .order('created_at', { ascending: false })
         .range(from, to);
 
-      if (data) setUsers(data as Profil[]);
+      // Récupérer les spécialités séparément
+      const userIds = (data ?? []).map(u => u.id);
+      const { data: secData } = await supabase
+        .from('profils_secretaires')
+        .select('id, specialite')
+        .in('id', userIds.length > 0 ? userIds : ['__none__']);
+
+      const specMap = new Map((secData ?? []).map(s => [s.id, s.specialite]));
+
+      if (data) {
+        const enriched = data.map(u => ({
+          ...u,
+          specialite: specMap.get(u.id) ?? null,
+        }));
+        setUsers(enriched as Profil[]);
+      }
       if (count !== null) setTotal(count);
       setLoading(false);
     };
@@ -93,6 +109,41 @@ export default function GestionUtilisateurs() {
       setMessage({ text: `Rôle mis à jour ✓`, type: 'success' });
     }
     setUpdating(null);
+  };
+
+  // Nouvelle fonction pour gérer la suppression d'un utilisateur
+  const deleteUser = async (userId: string) => {
+    if (!confirm("Voulez-vous vraiment supprimer cet utilisateur ? Cette action est irréversible.")) return;
+    
+    setUpdating(userId);
+    setMessage({ text: '', type: '' });
+
+    try {
+      // Note : Vous devrez créer cette route d'API utilisant supabase-admin (Service Role Key)
+      const response = await fetch('/api/admin/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      });
+      
+      if (response.ok) {
+        setUsers(prev => prev.filter(u => u.id !== userId));
+        setMessage({ text: 'Utilisateur supprimé avec succès.', type: 'success' });
+      } else {
+        setMessage({ text: 'Erreur lors de la suppression.', type: 'error' });
+      }
+    } catch (error) {
+      setMessage({ text: 'Erreur réseau.', type: 'error' });
+    }
+    setUpdating(null);
+  };
+
+  // Helper pour afficher la spécialité ou le rôle par défaut
+  const getSpecialite = (u: Profil) => {
+    if (u.role === 'secretaire' && u.specialite) {
+      return u.specialite;
+    }
+    return u.role;
   };
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
@@ -189,18 +240,23 @@ export default function GestionUtilisateurs() {
                     <th className="px-4 py-3 font-black text-[10px] uppercase tracking-widest text-slate-500 hidden md:table-cell">Téléphone</th>
                     <th className="px-4 py-3 font-black text-[10px] uppercase tracking-widest text-slate-500 hidden lg:table-cell">Inscrit le</th>
                     <th className="px-4 py-3 font-black text-[10px] uppercase tracking-widest text-slate-500">Rôle</th>
-                    <th className="px-4 py-3 font-black text-[10px] uppercase tracking-widest text-slate-500 text-right">Changer</th>
+                    <th className="px-4 py-3 font-black text-[10px] uppercase tracking-widest text-slate-500 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map(u => {
                     const isMe = u.id === me;
                     const isUpdating = updating === u.id;
+                    const isAdmin = u.role === 'admin';
+
                     return (
                       <tr key={u.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
                         <td className="px-4 py-3">
                           <div className="font-bold text-slate-900">
-                            {u.nom || '—'}
+                            {/* Nom cliquable vers le profil */}
+                            <Link href={`/dashboard/admin/utilisateurs/${u.id}`} className="hover:text-blue-600 hover:underline transition-colors">
+                              {u.nom || '—'}
+                            </Link>
                             {isMe && <span className="ml-2 text-[10px] font-black text-blue-600">(vous)</span>}
                           </div>
                           <div className="text-xs text-slate-500 truncate max-w-[240px]">{u.email}</div>
@@ -210,21 +266,36 @@ export default function GestionUtilisateurs() {
                           {new Date(u.created_at).toLocaleDateString('fr-FR')}
                         </td>
                         <td className="px-4 py-3">
+                          {/* Affichage de la spécialité au lieu du rôle */}
                           <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-md ${ROLE_STYLE[u.role]}`}>
-                            {u.role}
+                            {getSpecialite(u)}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-right">
+                        <td className="px-4 py-3 text-right flex items-center justify-end gap-2">
+                          {/* Select pour modifier le rôle */}
                           <select
                             value={u.role}
-                            disabled={isUpdating}
+                            disabled={isUpdating || isAdmin} // Impossible de modifier le rôle si c'est un admin
                             onChange={e => changeRole(u.id, e.target.value as Profil['role'])}
-                            className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold bg-white outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-wait"
+                            className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold bg-white outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             {ROLES.map(r => (
                               <option key={r} value={r}>{r}</option>
                             ))}
                           </select>
+                          
+                          {/* Bouton de suppression, masqué ou désactivé pour les admins */}
+                          <button
+                            type="button"
+                            onClick={() => deleteUser(u.id)}
+                            disabled={isUpdating || isAdmin}
+                            title={isAdmin ? "Impossible de supprimer un administrateur" : "Supprimer l'utilisateur"}
+                            className={`p-1.5 rounded-lg transition-colors ${isAdmin ? 'text-slate-300 cursor-not-allowed' : 'text-red-500 hover:bg-red-50 hover:text-red-700'}`}
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
                         </td>
                       </tr>
                     );

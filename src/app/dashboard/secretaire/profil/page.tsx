@@ -251,13 +251,25 @@ export default function ProfilSecretaire() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userId) return;
-    setSaving(true);
-    setMessage({ text: '', type: '' });
 
     const competencesArr = competences
       .split(',')
       .map(c => c.trim())
       .filter(c => c !== '');
+
+    if (!bio.trim()) { setMessage({ text: 'La bio est obligatoire.', type: 'error' }); return; }
+    if (!ville.trim()) { setMessage({ text: 'La ville est obligatoire.', type: 'error' }); return; }
+    if (!disponibilite) { setMessage({ text: 'La disponibilité est obligatoire.', type: 'error' }); return; }
+    if (!specialite) { setMessage({ text: 'La spécialité est obligatoire.', type: 'error' }); return; }
+    if (competencesArr.length === 0) { setMessage({ text: 'Au moins une compétence est requise.', type: 'error' }); return; }
+    if (outils.length === 0) { setMessage({ text: 'Sélectionnez au moins un outil.', type: 'error' }); return; }
+    if (softSkills.length === 0) { setMessage({ text: 'Sélectionnez au moins un soft skill.', type: 'error' }); return; }
+    if (!niveauEtudes) { setMessage({ text: 'Le niveau d\'études est obligatoire.', type: 'error' }); return; }
+    if (langues.length === 0) { setMessage({ text: 'Sélectionnez au moins une langue.', type: 'error' }); return; }
+    if (!experience || parseInt(experience) <= 0) { setMessage({ text: 'Les années d\'expérience sont obligatoires.', type: 'error' }); return; }
+
+    setSaving(true);
+    setMessage({ text: '', type: '' });
 
     const { error } = await supabase.from('profils_secretaires').upsert({
       id: userId,
@@ -379,10 +391,11 @@ export default function ProfilSecretaire() {
                 </h2>
 
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1.5">Bio courte</label>
+                  <label className="block text-sm font-bold text-slate-700 mb-1.5">Bio courte <span className="text-red-500">*</span></label>
                   <textarea
                     rows={3}
                     maxLength={500}
+                    required
                     value={bio}
                     onChange={e => setBio(e.target.value)}
                     className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
@@ -392,9 +405,10 @@ export default function ProfilSecretaire() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1.5">Ville</label>
+                  <label className="block text-sm font-bold text-slate-700 mb-1.5">Ville <span className="text-red-500">*</span></label>
                   <input
                     type="text"
+                    required
                     value={ville}
                     onChange={e => setVille(e.target.value)}
                     className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -403,7 +417,7 @@ export default function ProfilSecretaire() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">Disponibilité</label>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Disponibilité <span className="text-red-500">*</span></label>
                   <RadioRow options={DISPOS} value={disponibilite} onChange={setDisponibilite} />
                 </div>
 
@@ -438,10 +452,11 @@ export default function ProfilSecretaire() {
 
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1.5">
-                    Vos expertises (libres, séparées par des virgules)
+                    Vos expertises (libres, séparées par des virgules) <span className="text-red-500">*</span>
                   </label>
                   <textarea
                     rows={3}
+                    required
                     value={competences}
                     onChange={e => setCompetences(e.target.value)}
                     className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
@@ -451,14 +466,14 @@ export default function ProfilSecretaire() {
 
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Outils maîtrisés <span className="text-slate-400 font-medium">({outils.length} sélectionné{outils.length > 1 ? 's' : ''})</span>
+                    Outils maîtrisés <span className="text-red-500">*</span> <span className="text-slate-400 font-medium">({outils.length} sélectionné{outils.length > 1 ? 's' : ''})</span>
                   </label>
                   <ChipMultiSelect options={OUTILS} selected={outils} onChange={setOutils} color="blue" />
                 </div>
 
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Soft skills <span className="text-slate-400 font-medium">({softSkills.length})</span>
+                    Soft skills <span className="text-red-500">*</span> <span className="text-slate-400 font-medium">({softSkills.length})</span>
                   </label>
                   <ChipMultiSelect options={SOFT_SKILLS} selected={softSkills} onChange={setSoftSkills} color="emerald" />
                 </div>
@@ -474,23 +489,24 @@ export default function ProfilSecretaire() {
                 </h2>
 
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">Niveau d&apos;études</label>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Niveau d&apos;études <span className="text-red-500">*</span></label>
                   <RadioRow options={NIVEAUX} value={niveauEtudes} onChange={setNiveauEtudes} />
                 </div>
 
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Langues parlées <span className="text-slate-400 font-medium">({langues.length})</span>
+                    Langues parlées <span className="text-red-500">*</span> <span className="text-slate-400 font-medium">({langues.length})</span>
                   </label>
                   <ChipMultiSelect options={LANGUES} selected={langues} onChange={setLangues} color="blue" />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1.5">Années d&apos;expérience</label>
+                  <label className="block text-sm font-bold text-slate-700 mb-1.5">Années d&apos;expérience <span className="text-red-500">*</span></label>
                   <div className="relative max-w-xs">
                     <input
                       type="number"
-                      min={0}
+                      min={1}
+                      required
                       value={experience}
                       onChange={e => setExperience(e.target.value)}
                       className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-12"

@@ -110,6 +110,7 @@ export default function Navbar() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [userRole, setUserRole] = useState<UserRole>('entreprise');
+  const [userSpecialite, setUserSpecialite] = useState<string | null>(null);
 
   const router = useRouter();
   const pathname = usePathname();
@@ -130,6 +131,14 @@ export default function Navbar() {
 
       if (!error && profil?.role) {
         if (!cancelled) setUserRole(profil.role as UserRole);
+        if (profil.role === 'secretaire') {
+          const { data: secProfil } = await supabase
+            .from('profils_secretaires')
+            .select('specialite')
+            .eq('id', currentUser.id)
+            .maybeSingle();
+          if (!cancelled) setUserSpecialite(secProfil?.specialite ?? null);
+        }
         return;
       }
 
@@ -187,6 +196,7 @@ export default function Navbar() {
         void resolveRole(nextUser);
       } else {
         setUserRole('entreprise');
+        setUserSpecialite(null);
       }
     });
 
@@ -250,7 +260,7 @@ export default function Navbar() {
   }, [displayName]);
 
   const avatarUrl = metadata?.avatar_url;
-  const roleLabel = ROLE_LABELS[userRole];
+  const roleLabel = userRole === 'secretaire' && userSpecialite ? userSpecialite : ROLE_LABELS[userRole];
 
   const dashboardActive = pathname === '/dashboard' || (pathname.startsWith('/dashboard/') && !pathname.startsWith('/dashboard/admin'));
   const adminActive = pathname.startsWith('/dashboard/admin');

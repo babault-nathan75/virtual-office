@@ -296,11 +296,33 @@ export default function ChercherSecretaire() {
         .select('id, photo_url, bio, ville, disponibilite, niveau_etudes, specialite, langues, outils, soft_skills, competences, annees_experience')
         .in('id', visibleIds.length > 0 ? visibleIds : ['__none__']);
 
+      // Filtrer uniquement les profils 100% complets
+      const completeIds = new Set(
+        (metiers ?? [])
+          .filter(m =>
+            m.photo_url &&
+            m.specialite &&
+            (m.competences?.length ?? 0) > 0 &&
+            (m.outils?.length ?? 0) > 0 &&
+            (m.soft_skills?.length ?? 0) > 0 &&
+            (m.langues?.length ?? 0) > 0 &&
+            m.niveau_etudes &&
+            m.ville &&
+            m.disponibilite &&
+            m.annees_experience &&
+            m.annees_experience > 0 &&
+            (m.bio?.trim().length ?? 0) >= 20
+          )
+          .map(m => m.id)
+      );
+
       // Merge
-      const merged: Secretaire[] = (profils ?? []).map(p => {
-        const m = (metiers ?? []).find(x => x.id === p.id) ?? {};
-        return { id: p.id, nom: p.nom, ...m };
-      });
+      const merged: Secretaire[] = (profils ?? [])
+        .filter(p => completeIds.has(p.id))
+        .map(p => {
+          const m = (metiers ?? []).find(x => x.id === p.id) ?? {};
+          return { id: p.id, nom: p.nom, ...m };
+        });
 
       setSecretaires(merged);
       setLoading(false);

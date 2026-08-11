@@ -31,6 +31,8 @@ export default async function DashboardSecretairePage() {
       userName={data.profil?.nom || 'Secrétaire'}
       userAvatar={data.profilSecretaire?.photo_url}
       completion={completion}
+      kycApproved={data.kycApproved}
+      twoFactorEnabled={data.twoFactorEnabled}
       missions={data.missions as any}
       candidatures={data.candidatures as any}
       offres={data.offres as any}

@@ -42,6 +42,8 @@ type Props = {
   userName: string;
   userAvatar?: string;
   completion: number;
+  kycApproved: boolean;
+  twoFactorEnabled: boolean;
   missions: Mission[];
   candidatures: Candidature[];
   offres: Offre[];
@@ -52,6 +54,8 @@ export default function SecretaireDashboardClient({
   userName,
   userAvatar,
   completion,
+  kycApproved,
+  twoFactorEnabled,
   missions,
   candidatures,
   offres
@@ -130,7 +134,18 @@ export default function SecretaireDashboardClient({
                 </div>
                 {completion < 100 && (
                   <p className="text-xs text-slate-500 mt-2 font-medium flex items-center gap-1.5">
-                    <span className="text-amber-500">💡</span> Complétez votre profil pour attirer plus d'entreprises.
+                    <span className="text-amber-500">💡</span>Complétez votre profil pour attirer plus d&apos;entreprises.
+                    <a href="/dashboard/secretaire/profil" className="text-blue-600 hover:underline font-semibold ml-1">
+                      Compléter
+                    </a>
+                  </p>
+                )}
+                {(!kycApproved || !twoFactorEnabled) && (
+                  <p className="text-xs text-red-600 mt-1.5 font-bold flex items-center gap-1.5">
+                    <span>🔒</span>
+                    {!kycApproved && !twoFactorEnabled && 'KYC et 2FA requis pour être visible par les entreprises.'}
+                    {!kycApproved && twoFactorEnabled && 'KYC requis pour être visible par les entreprises.'}
+                    {kycApproved && !twoFactorEnabled && '2FA requise pour être visible par les entreprises.'}
                   </p>
                 )}
               </div>
