@@ -25,7 +25,6 @@ export function PhotoCapture({
   const [showCamera, setShowCamera] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  const [requesting, setRequesting] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -64,40 +63,16 @@ export function PhotoCapture({
 
   const startCamera = useCallback(async () => {
     setCameraError(null);
-    setRequesting(true);
-
-    // Vérifier si le navigateur supporte la caméra
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setCameraError('Votre navigateur ne supporte pas la caméra. Utilisez l\'import de fichier.');
-      setRequesting(false);
-      return;
-    }
-
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
-      });
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
       setStream(mediaStream);
       setShowCamera(true);
-      setRequesting(false);
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
       }
-    } catch (err: unknown) {
-      setRequesting(false);
-      if (err instanceof DOMException) {
-        if (err.name === 'NotAllowedError') {
-          setCameraError('Accès caméra refusé. Autorisez l\'accès dans les paramètres de votre navigateur, puis réessayez.');
-        } else if (err.name === 'NotFoundError') {
-          setCameraError('Aucune caméra détectée. Utilisez l\'import de fichier.');
-        } else if (err.name === 'NotReadableError') {
-          setCameraError('Caméra utilisée par une autre application. Fermez les autres apps caméra et réessayez.');
-        } else {
-          setCameraError('Erreur caméra. Utilisez l\'import de fichier.');
-        }
-      } else {
-        setCameraError('Erreur inattendue. Utilisez l\'import de fichier.');
-      }
+    } catch (err) {
+      console.error('Camera error:', err);
+      setCameraError('Caméra indisponible. Autorisez l\'accès dans votre navigateur puis réessayez, ou utilisez l\'import de fichier.');
     }
   }, []);
 
@@ -129,12 +104,8 @@ export function PhotoCapture({
     return (
       <div className="relative">
         <div className="relative rounded-2xl overflow-hidden border-2 border-emerald-200 bg-emerald-50">
-          <img
-            src={preview}
-            alt="Aperçu"
-            className="w-full h-48 object-cover"
-          />
-          <div className="absolute top-2 right-2 flex gap-2">
+          <img src={preview} alt="Aperçu" className="w-full h-48 object-cover" />
+          <div className="absolute top-2 right-2">
             <button
               onClick={reset}
               className="bg-red-500 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold shadow-lg hover:bg-red-600 transition"
@@ -157,29 +128,12 @@ export function PhotoCapture({
     return (
       <div className="space-y-3">
         <div className="relative rounded-2xl overflow-hidden border-2 border-blue-200 bg-black">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-64 object-cover"
-            onLoadedMetadata={() => videoRef.current?.play()}
-          />
+          <video ref={videoRef} autoPlay playsInline muted className="w-full h-64 object-cover" />
           <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-3">
-            <Button
-              type="button"
-              onClick={takePhoto}
-              variant="primary"
-              className="rounded-full px-6"
-            >
+            <Button type="button" onClick={takePhoto} variant="primary" className="rounded-full px-6">
               📸 Prendre la photo
             </Button>
-            <Button
-              type="button"
-              onClick={() => { stopStream(); setShowCamera(false); }}
-              variant="secondary"
-              className="rounded-full px-4"
-            >
+            <Button type="button" onClick={() => { stopStream(); setShowCamera(false); }} variant="secondary" className="rounded-full px-4">
               Annuler
             </Button>
           </div>
@@ -190,13 +144,7 @@ export function PhotoCapture({
 
   return (
     <div className="space-y-2">
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept={accept}
-        className="hidden"
-        onChange={handleFileInput}
-      />
+      <input ref={fileInputRef} type="file" accept={accept} className="hidden" onChange={handleFileInput} />
 
       <label
         onClick={() => fileInputRef.current?.click()}
@@ -213,26 +161,16 @@ export function PhotoCapture({
         <div className="flex-1 h-px bg-slate-200" />
       </div>
 
-      <Button
-        type="button"
-        onClick={startCamera}
-        disabled={requesting}
-        variant="secondary"
-        className="w-full rounded-xl"
-      >
-        {requesting ? (
-          <span className="flex items-center justify-center gap-2">
-            <span className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
-            Demande d&apos;autorisation...
-          </span>
-        ) : (
-          '📷 Prendre avec la caméra'
-        )}
+      <Button type="button" onClick={startCamera} variant="secondary" className="w-full rounded-xl">
+        📷 Prendre avec la caméra
       </Button>
 
       {cameraError && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
           <p className="text-xs text-amber-700 font-medium leading-relaxed">{cameraError}</p>
+          <Button type="button" onClick={startCamera} variant="secondary" className="text-xs py-1.5 px-3 rounded-lg">
+            🔄 Réessayer
+          </Button>
         </div>
       )}
     </div>
