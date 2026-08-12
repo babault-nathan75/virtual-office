@@ -11,7 +11,7 @@ const ALLOWED_REDIRECT_PATHS = [
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
-  const role = searchParams.get('role') || 'entreprise';
+  const role = searchParams.get('role') || 'secretaire';
 
   if (code) {
     const supabase = createClient(
