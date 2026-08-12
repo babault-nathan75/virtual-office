@@ -57,6 +57,15 @@ const FIELD_EXPLANATIONS: FieldExplanation[] = [
   },
 ];
 
+type FieldResult = {
+  match: boolean;
+  score: number;
+  extracted: string;
+  provided: string;
+  explanation: string;
+  suggestion: string | null;
+};
+
 type VerificationResult = {
   faceMatch: {
     score: number;
@@ -64,17 +73,17 @@ type VerificationResult = {
     explanation: string;
   };
   ocr: {
-    prenom: string;
+    prenoms: string[];
     nom: string;
     date_naissance: string;
     nationalite: string;
     numero_document: string;
   };
   fieldComparison: {
-    prenom: { match: boolean; extracted: string; provided: string; explanation: string };
-    nom: { match: boolean; extracted: string; provided: string; explanation: string };
-    date_naissance: { match: boolean; extracted: string; provided: string; explanation: string };
-    nationalite: { match: boolean; extracted: string; provided: string; explanation: string };
+    prenom: FieldResult;
+    nom: FieldResult;
+    date_naissance: FieldResult;
+    nationalite: FieldResult;
   };
   overallScore: number;
   overallExplanation: string;
@@ -389,18 +398,33 @@ export default function KycPage() {
                             placeholder={field.label}
                           />
                           <p className="text-xs text-slate-500 mt-1 leading-relaxed">{field.description}</p>
-                          {comparison && !comparison.match && (
-                            <div className="mt-2 p-2 rounded-lg bg-red-50 border border-red-200">
-                              <p className="text-xs text-red-700 font-medium">
-                                <span className="font-bold">Extrait par IA :</span> {comparison.extracted}
-                              </p>
-                              <p className="text-xs text-red-600 mt-1">{comparison.explanation}</p>
-                            </div>
-                          )}
-                          {comparison && comparison.match && (
-                            <div className="mt-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200">
-                              <p className="text-xs text-emerald-700 font-medium">✓ Correspondance vérifiée par IA</p>
-                              <p className="text-xs text-emerald-600 mt-1">{comparison.explanation}</p>
+                          {comparison && (
+                            <div className={`mt-2 p-3 rounded-lg border ${
+                              comparison.match
+                                ? 'bg-emerald-50 border-emerald-200'
+                                : 'bg-red-50 border-red-200'
+                            }`}>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className={`text-xs font-bold ${
+                                  comparison.match ? 'text-emerald-700' : 'text-red-700'
+                                }`}>
+                                  {comparison.match ? '✓ Correspond' : '✗ Ne correspond pas'}
+                                </span>
+                                <span className={`text-xs font-black px-2 py-0.5 rounded-full ${
+                                  comparison.score >= 80 ? 'bg-emerald-100 text-emerald-700'
+                                    : comparison.score >= 50 ? 'bg-amber-100 text-amber-700'
+                                    : 'bg-red-100 text-red-700'
+                                }`}>
+                                  {comparison.score}/100
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-600 leading-relaxed">{comparison.explanation}</p>
+                              {comparison.suggestion && (
+                                <div className="mt-2 p-2 bg-blue-50 rounded-lg border border-blue-200">
+                                  <p className="text-xs text-blue-700 font-bold">💡 Suggestion :</p>
+                                  <p className="text-xs text-blue-600">{comparison.suggestion}</p>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -663,18 +687,33 @@ export default function KycPage() {
                         placeholder={field.label}
                       />
                       <p className="text-xs text-slate-500 mt-1 leading-relaxed">{field.description}</p>
-                      {comparison && !comparison.match && (
-                        <div className="mt-2 p-2 rounded-lg bg-red-50 border border-red-200">
-                          <p className="text-xs text-red-700 font-medium">
-                            <span className="font-bold">Extrait par IA :</span> {comparison.extracted}
-                          </p>
-                          <p className="text-xs text-red-600 mt-1">{comparison.explanation}</p>
-                        </div>
-                      )}
-                      {comparison && comparison.match && (
-                        <div className="mt-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200">
-                          <p className="text-xs text-emerald-700 font-medium">✓ Correspondance vérifiée par IA</p>
-                          <p className="text-xs text-emerald-600 mt-1">{comparison.explanation}</p>
+                      {comparison && (
+                        <div className={`mt-2 p-3 rounded-lg border ${
+                          comparison.match
+                            ? 'bg-emerald-50 border-emerald-200'
+                            : 'bg-red-50 border-red-200'
+                        }`}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className={`text-xs font-bold ${
+                              comparison.match ? 'text-emerald-700' : 'text-red-700'
+                            }`}>
+                              {comparison.match ? '✓ Correspond' : '✗ Ne correspond pas'}
+                            </span>
+                            <span className={`text-xs font-black px-2 py-0.5 rounded-full ${
+                              comparison.score >= 80 ? 'bg-emerald-100 text-emerald-700'
+                                : comparison.score >= 50 ? 'bg-amber-100 text-amber-700'
+                                : 'bg-red-100 text-red-700'
+                            }`}>
+                              {comparison.score}/100
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-600 leading-relaxed">{comparison.explanation}</p>
+                          {comparison.suggestion && (
+                            <div className="mt-2 p-2 bg-blue-50 rounded-lg border border-blue-200">
+                              <p className="text-xs text-blue-700 font-bold">💡 Suggestion :</p>
+                              <p className="text-xs text-blue-600">{comparison.suggestion}</p>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
