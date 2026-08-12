@@ -24,7 +24,7 @@ export function PhotoCapture({
   const [fileName, setFileName] = useState<string | null>(null);
   const [showCamera, setShowCamera] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraAvailable, setCameraAvailable] = useState<boolean | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -37,6 +37,23 @@ export function PhotoCapture({
       setStream(null);
     }
   }, [stream]);
+
+  useEffect(() => {
+    const checkCamera = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraAvailable(false);
+        return;
+      }
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const hasCamera = devices.some(d => d.kind === 'videoinput');
+        setCameraAvailable(hasCamera);
+      } catch {
+        setCameraAvailable(false);
+      }
+    };
+    checkCamera();
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -63,7 +80,6 @@ export function PhotoCapture({
   }, [handleFile]);
 
   const startCamera = useCallback(async () => {
-    setCameraError(null);
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
       setStream(mediaStream);
@@ -72,13 +88,7 @@ export function PhotoCapture({
         videoRef.current.srcObject = mediaStream;
       }
     } catch {
-      setCameraError('Caméra indisponible. Utilisez le bouton ci-dessous pour ouvrir l\'appareil photo.');
-    }
-  }, []);
-
-  const openNativeCamera = useCallback(() => {
-    if (cameraInputRef.current) {
-      cameraInputRef.current.click();
+      setCameraAvailable(false);
     }
   }, []);
 
@@ -162,23 +172,18 @@ export function PhotoCapture({
         <p className="text-xs text-slate-400 mt-1">{sublabel || 'JPG, PNG ou PDF (max 5 Mo)'}</p>
       </label>
 
-      <div className="flex items-center gap-2 text-xs text-slate-400">
-        <div className="flex-1 h-px bg-slate-200" />
-        <span>ou</span>
-        <div className="flex-1 h-px bg-slate-200" />
-      </div>
+      {cameraAvailable !== false && (
+        <>
+          <div className="flex items-center gap-2 text-xs text-slate-400">
+            <div className="flex-1 h-px bg-slate-200" />
+            <span>ou</span>
+            <div className="flex-1 h-px bg-slate-200" />
+          </div>
 
-      <Button type="button" onClick={openNativeCamera} variant="secondary" className="w-full rounded-xl">
-        📷 Prendre avec la caméra
-      </Button>
-
-      {cameraError && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
-          <p className="text-xs text-amber-700 font-medium leading-relaxed">{cameraError}</p>
-          <Button type="button" onClick={openNativeCamera} variant="secondary" className="text-xs py-1.5 px-3 rounded-lg">
-            🔄 Réessayer
+          <Button type="button" onClick={startCamera} variant="secondary" className="w-full rounded-xl">
+            📷 Prendre avec la caméra
           </Button>
-        </div>
+        </>
       )}
     </div>
   );

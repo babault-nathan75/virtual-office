@@ -26,8 +26,8 @@ type FieldExplanation = {
 
 const FIELD_EXPLANATIONS: FieldExplanation[] = [
   {
-    label: 'Prénom',
-    description: 'Le prénom tel qu\'il apparaît sur votre pièce d\'identité officielle. Il doit correspondre exactement au document fourni. Les accents et caractères spéciaux sont importants.',
+    label: 'Prénom(s)',
+    description: 'Le(s) prénom(s) tel(s) qu\'il(s) apparaît(ent) sur votre pièce d\'identité officielle. Il doit correspondre exactement au document fourni. Les accents et caractères spéciaux sont importants.',
     icon: '👤',
     required: true,
   },
