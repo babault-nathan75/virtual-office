@@ -88,7 +88,10 @@ export function PhotoCapture({
         videoRef.current.srcObject = mediaStream;
       }
     } catch {
-      setCameraAvailable(false);
+      // Fallback: ouvrir la caméra native du téléphone
+      if (cameraInputRef.current) {
+        cameraInputRef.current.click();
+      }
     }
   }, []);
 
