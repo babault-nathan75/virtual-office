@@ -22,6 +22,8 @@ export default function AdminStatsPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
 
+  useDocumentTitle('Statistiques');
+
   useEffect(() => {
     const run = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -99,8 +101,6 @@ export default function AdminStatsPage() {
     </div>
   );
   if (!stats) return null;
-
-  useDocumentTitle('Statistiques');
 
   const maxDaily = Math.max(...stats.dailyActivity.map(d => d.count), 1);
 

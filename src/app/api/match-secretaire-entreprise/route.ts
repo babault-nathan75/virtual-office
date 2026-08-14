@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Clé API Gemini non configurée' }, { status: 500 });
     }
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
     const prompt = `Tu es un expert en recrutement de secrétaires. Analyse la correspondance entre ce profil de secrétaire et les critères de recherche d'une entreprise.
 

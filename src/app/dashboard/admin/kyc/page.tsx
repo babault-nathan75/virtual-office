@@ -5,7 +5,6 @@ import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
 import { toast } from '@/components/Toast';
-import ConfirmModal from '@/components/ConfirmModal';
 
 type KycEntry = {
   id: number;
@@ -37,24 +36,7 @@ export default function AdminKycPage() {
   const [rejectModal, setRejectModal] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState('');
 
-  useEffect(() => {
-    const fetchData = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { router.push('/connexion'); return; }
-
-      const { data: profil } = await supabase.from('profils').select('role').eq('id', session.user.id).maybeSingle();
-      if (!profil || profil.role !== 'admin') {
-        router.push('/dashboard');
-        return;
-      }
-
-      await loadKyc();
-      setLoading(false);
-    };
-    fetchData();
-  }, [router]);
-
-  const loadKyc = async () => {
+  async function loadKyc() {
     const { data: kycs } = await supabase
       .from('kyc_verifications')
       .select('*')
@@ -76,7 +58,24 @@ export default function AdminKycPage() {
       user_nom: profilMap.get(k.user_id)?.nom ?? '—',
       user_email: profilMap.get(k.user_id)?.email ?? '—',
     })) as KycEntry[]);
-  };
+  }
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { router.push('/connexion'); return; }
+
+      const { data: profil } = await supabase.from('profils').select('role').eq('id', session.user.id).maybeSingle();
+      if (!profil || profil.role !== 'admin') {
+        router.push('/dashboard');
+        return;
+      }
+
+      await loadKyc();
+      setLoading(false);
+    };
+    fetchData();
+  }, [router]);
 
   const handleApprove = async (kycId: number) => {
     setActing(kycId);

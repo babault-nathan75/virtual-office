@@ -142,6 +142,7 @@ function RadioRow<T extends string>({
 
 export default function ProfilSecretaire() {
   const router = useRouter();
+  useDocumentTitle('Mon profil');
 
   // Auth
   const [userId, setUserId] = useState<string | null>(null);
@@ -306,8 +307,6 @@ export default function ProfilSecretaire() {
   }
 
   // ----- Render --------------------------------------------------------------
-
-  useDocumentTitle('Mon profil');
 
   return (
     <main className="min-h-screen bg-slate-50 py-12 px-4 font-sans antialiased">

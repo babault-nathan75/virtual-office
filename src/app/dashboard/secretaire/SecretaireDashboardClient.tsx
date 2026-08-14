@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
 import { toast } from '@/components/Toast';
 import NotificationBell from '@/components/NotificationBell';
+import KycStatusBanner from '@/components/KycStatusBanner';
 import { postulerAction } from '@/lib/data/secretaire-client';
 
 type Mission = {
@@ -163,6 +164,8 @@ export default function SecretaireDashboardClient({
             <Link href="/dashboard/secretaire/avis" className="flex-1 xl:flex-none text-center bg-amber-50 border border-amber-200 text-amber-700 px-4 py-2.5 rounded-xl font-semibold hover:bg-amber-100 transition">⭐ Avis</Link>
           </div>
         </div>
+
+        <KycStatusBanner userId={userId} />
 
         {/* CONTENU PRINCIPAL */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

@@ -6,6 +6,7 @@ import Link from '@/components/Link';
 import { toast } from '@/components/Toast';
 import { ConfirmDialog } from '@/components/ui';
 import NotificationBell from '@/components/NotificationBell';
+import KycStatusBanner from '@/components/KycStatusBanner';
 import { proposerOffreAction, refuserCandidatureAction, EntrepriseDashboardData } from '@/lib/data/entreprise-client';
 
 type Props = {
@@ -108,6 +109,8 @@ export default function EntrepriseDashboardClient({ initialData, userId, userNam
             <Link href="/dashboard/entreprise/nouvelle-mission" className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-100 transition flex items-center justify-center gap-2"><span>+</span> Publier une mission</Link>
           </div>
         </div>
+
+        {userId && <KycStatusBanner userId={userId} />}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
