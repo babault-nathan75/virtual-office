@@ -23,8 +23,8 @@ export default function KycGuard({ children }: { children: React.ReactNode }) {
         .eq('id', session.user.id)
         .maybeSingle();
 
-      // Les admins bypassent le KYC
-      if (profil?.role === 'admin') {
+      // Les admins et les entreprises bypassent le KYC
+      if (profil?.role === 'admin' || profil?.role === 'entreprise') {
         setStatus('approved');
         setLoading(false);
         return;

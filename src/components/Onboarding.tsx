@@ -47,6 +47,9 @@ export default function Onboarding() {
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(-1);
   const [visible, setVisible] = useState(false);
+  const [role, setRole] = useState<string | null>(null);
+
+  const steps = role === 'entreprise' ? STEPS.filter(s => s.title !== 'Vérifiez votre identité') : STEPS;
 
   useEffect(() => {
     const check = async () => {
@@ -55,11 +58,12 @@ export default function Onboarding() {
 
       const { data } = await supabase
         .from('profils')
-        .select('onboarding_completed')
+        .select('onboarding_completed, role')
         .eq('id', session.user.id)
         .maybeSingle();
 
       if (data && !data.onboarding_completed) {
+        setRole(data.role);
         setTimeout(() => { setVisible(true); setCurrentStep(0); }, 1500);
       }
     };
@@ -76,7 +80,7 @@ export default function Onboarding() {
   };
 
   const handleNext = () => {
-    if (currentStep < STEPS.length - 1) {
+    if (currentStep < steps.length - 1) {
       setCurrentStep(prev => prev + 1);
     } else {
       dismiss();
@@ -84,14 +88,14 @@ export default function Onboarding() {
   };
 
   const handleGo = () => {
-    const step = STEPS[currentStep];
+    const step = steps[currentStep];
     dismiss();
     router.push(step.href);
   };
 
   if (!visible || currentStep < 0) return null;
-  const step = STEPS[currentStep];
-  const progress = ((currentStep + 1) / STEPS.length) * 100;
+  const step = steps[currentStep];
+  const progress = ((currentStep + 1) / steps.length) * 100;
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" onClick={dismiss}>
@@ -120,7 +124,7 @@ export default function Onboarding() {
         {/* Steps list */}
         <div className="px-8 pb-6">
           <div className="space-y-2">
-            {STEPS.map((s, i) => (
+            {steps.map((s, i) => (
               <div key={i} className={`flex items-center gap-3 p-3 rounded-xl transition-all duration-300 ${i === currentStep ? 'bg-slate-50 ring-1 ring-slate-200 shadow-sm' : i < currentStep ? 'bg-emerald-50' : 'opacity-40'}`}>
                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all duration-300 ${i < currentStep ? 'bg-emerald-100 text-emerald-600 scale-90' : i === currentStep ? `${s.bgLight} text-slate-700 scale-110` : 'bg-slate-100 text-slate-400'}`}>
                   {i < currentStep ? (
@@ -143,14 +147,14 @@ export default function Onboarding() {
           <button onClick={handleGo} className="flex-1 py-3 rounded-xl text-sm font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 transition-all duration-200 active:scale-95">
             Aller
           </button>
-          <button onClick={handleNext} className={`flex-1 py-3 rounded-xl text-sm font-bold text-white transition-all duration-200 active:scale-95 ${currentStep < STEPS.length - 1 ? 'bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-200' : 'bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-200'}`}>
-            {currentStep < STEPS.length - 1 ? 'Suivant' : 'Terminer'}
+          <button onClick={handleNext} className={`flex-1 py-3 rounded-xl text-sm font-bold text-white transition-all duration-200 active:scale-95 ${currentStep < steps.length - 1 ? 'bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-200' : 'bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-200'}`}>
+            {currentStep < steps.length - 1 ? 'Suivant' : 'Terminer'}
           </button>
         </div>
 
         {/* Dots */}
         <div className="flex justify-center gap-2 pb-6">
-          {STEPS.map((_, i) => (
+          {steps.map((_, i) => (
             <div key={i} className={`rounded-full transition-all duration-300 ${i === currentStep ? 'bg-blue-600 w-5 h-2' : i < currentStep ? 'bg-blue-300 w-2 h-2' : 'bg-slate-200 w-2 h-2'}`} />
           ))}
         </div>

@@ -14,7 +14,6 @@ type FormData = {
   nom_naissance: string;
   date_naissance: string;
   nationalite: string;
-  nom_entreprise: string;
 };
 
 type FieldExplanation = {
@@ -27,7 +26,7 @@ type FieldExplanation = {
 const FIELD_EXPLANATIONS: FieldExplanation[] = [
   {
     label: 'Prénom',
-    description: 'Le prénom tel qu\'il apparaît sur votre pièce d\'identité officielle.',
+    description: 'Le(s) prénom(s) tel qu\'il apparaît(ssent) sur votre pièce d\'identité officielle.',
     icon: '👤',
     required: true,
   },
@@ -49,12 +48,6 @@ const FIELD_EXPLANATIONS: FieldExplanation[] = [
     icon: '🌍',
     required: false,
   },
-  {
-    label: 'Nom de l\'entreprise',
-    description: 'La raison sociale officielle de votre entreprise.',
-    icon: '🏢',
-    required: false,
-  },
 ];
 
 type ExistingKyc = {
@@ -66,7 +59,6 @@ export default function KycPage() {
   useDocumentTitle('Vérification d\'identité');
   const router = useRouter();
   const [userId, setUserId] = useState('');
-  const [role, setRole] = useState<'entreprise' | 'secretaire'>('entreprise');
   const [existingKyc, setExistingKyc] = useState<ExistingKyc>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -76,12 +68,10 @@ export default function KycPage() {
     nom_naissance: '',
     date_naissance: '',
     nationalite: '',
-    nom_entreprise: '',
   });
 
   const [pieceIdentite, setPieceIdentite] = useState<File | null>(null);
   const [selfie, setSelfie] = useState<File | null>(null);
-  const [docEntreprise, setDocEntreprise] = useState<File | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -97,7 +87,10 @@ export default function KycPage() {
         .maybeSingle();
 
       if (profil) {
-        setRole(profil.role as 'entreprise' | 'secretaire');
+        if (profil.role === 'entreprise') {
+          router.push('/dashboard/entreprise');
+          return;
+        }
         setForm(prev => ({ ...prev, prenom: profil.nom || '' }));
       }
 
@@ -121,13 +114,12 @@ export default function KycPage() {
   const uploadFile = async (file: File, bucket: string): Promise<string | null> => {
     const ext = file.name.split('.').pop();
     const path = `${userId}/${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from(bucket).upload(path, file, {
+    const { data, error } = await supabase.storage.from(bucket).upload(path, file, {
       contentType: file.type,
       upsert: true,
     });
     if (error) return null;
-    const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-    return data.publicUrl;
+    return data?.path ?? path;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -143,10 +135,6 @@ export default function KycPage() {
     }
     if (!selfie) {
       toast.error('Veuillez télécharger un selfie.');
-      return;
-    }
-    if (role === 'entreprise' && !docEntreprise) {
-      toast.error('Veuillez télécharger un document d\'entreprise (K-bis).');
       return;
     }
 
@@ -166,16 +154,6 @@ export default function KycPage() {
       return;
     }
 
-    let docEntrepriseUrl = null;
-    if (role === 'entreprise' && docEntreprise) {
-      docEntrepriseUrl = await uploadFile(docEntreprise, 'kyc-entreprises');
-      if (!docEntrepriseUrl) {
-        toast.error('Erreur lors de l\'upload du document entreprise.');
-        setSubmitting(false);
-        return;
-      }
-    }
-
     const kycData = {
       user_id: userId,
       statut: 'pending',
@@ -183,17 +161,21 @@ export default function KycPage() {
       nom_naissance: form.nom_naissance.trim(),
       date_naissance: form.date_naissance,
       nationalite: form.nationalite.trim() || null,
-      type_compte: role,
+      type_compte: 'secretaire',
       piece_identite_url: identiteUrl,
       selfie_url: selfieUrl,
-      document_entreprise_url: docEntrepriseUrl,
-      nom_entreprise: role === 'entreprise' ? form.nom_entreprise.trim() || null : null,
       motif_rejet: null,
     };
 
-    const { error } = await supabase
+    const { data: existing } = await supabase
       .from('kyc_verifications')
-      .upsert(kycData, { onConflict: 'user_id' });
+      .select('id')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    const { error } = existing?.id
+      ? await supabase.from('kyc_verifications').update(kycData).eq('user_id', userId)
+      : await supabase.from('kyc_verifications').insert(kycData);
 
     if (error) {
       toast.error('Erreur : ' + error.message);
@@ -210,7 +192,7 @@ export default function KycPage() {
           userId,
           prenom: form.prenom.trim(),
           nom: form.nom_naissance.trim(),
-          type: role,
+          type: 'secretaire',
         }),
       });
     } catch {
@@ -310,12 +292,6 @@ export default function KycPage() {
                       );
                     })}
                   </div>
-                  {role === 'entreprise' && (
-                    <div className="mt-4">
-                      <label className="block text-sm font-bold text-slate-700 mb-1.5">🏢 Nom de l&apos;entreprise</label>
-                      <input type="text" value={form.nom_entreprise} onChange={e => updateForm('nom_entreprise', e.target.value)} className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 transition" placeholder="Raison sociale" />
-                    </div>
-                  )}
                 </section>
 
                 <section>
@@ -333,16 +309,6 @@ export default function KycPage() {
                   </h2>
                   <PhotoCapture onCapture={setSelfie} label="Importer un selfie" sublabel="Photo de vous-même (JPG, PNG)" icon="🤳" accept="image/*" />
                 </section>
-
-                {role === 'entreprise' && (
-                  <section>
-                    <h2 className="text-lg font-black tracking-tight text-slate-900 mb-2 flex items-center gap-2">
-                      <span className="bg-blue-100 text-blue-700 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold">4</span>
-                      Document entreprise *
-                    </h2>
-                    <PhotoCapture onCapture={setDocEntreprise} label="Importer un document d'entreprise" sublabel="K-bis ou registre du commerce" icon="🏢" />
-                  </section>
-                )}
 
                 <Button type="submit" disabled={submitting} variant="primary" size="lg" className="w-full">
                   {submitting ? 'Envoi en cours...' : '✓ Soumettre mon KYC'}
@@ -400,13 +366,6 @@ export default function KycPage() {
                   );
                 })}
               </div>
-              {role === 'entreprise' && (
-                <div className="mt-4">
-                  <label className="block text-sm font-bold text-slate-700 mb-1.5">🏢 Nom de l&apos;entreprise</label>
-                  <input type="text" value={form.nom_entreprise} onChange={e => updateForm('nom_entreprise', e.target.value)} className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 transition" placeholder="Raison sociale" />
-                  <p className="text-xs text-slate-500 mt-1">La raison sociale officielle de votre entreprise.</p>
-                </div>
-              )}
             </section>
 
             <section>
@@ -426,17 +385,6 @@ export default function KycPage() {
               <p className="text-xs text-slate-500 font-medium mb-3">Prenez un selfie face caméra.</p>
               <PhotoCapture onCapture={setSelfie} label="Importer un selfie" sublabel="Photo de vous-même (JPG, PNG)" icon="🤳" accept="image/*" />
             </section>
-
-            {role === 'entreprise' && (
-              <section>
-                <h2 className="text-lg font-black tracking-tight text-slate-900 mb-2 flex items-center gap-2">
-                  <span className="bg-blue-100 text-blue-700 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold">4</span>
-                  Document entreprise *
-                </h2>
-                <p className="text-xs text-slate-500 font-medium mb-3">K-bis, registre du commerce ou équivalent.</p>
-                <PhotoCapture onCapture={setDocEntreprise} label="Importer un document d'entreprise" sublabel="K-bis ou registre du commerce" icon="🏢" />
-              </section>
-            )}
 
             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
               <p className="text-xs text-slate-600 font-medium leading-relaxed">

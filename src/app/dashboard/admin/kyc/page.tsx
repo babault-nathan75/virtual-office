@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
 import { toast } from '@/components/Toast';
+import { getKycSignedUrl, KYC_BUCKETS } from '@/lib/kycStorage';
 
 type KycEntry = {
   id: number;
@@ -33,13 +34,26 @@ export default function AdminKycPage() {
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
   const [acting, setActing] = useState<number | null>(null);
   const [selectedKyc, setSelectedKyc] = useState<KycEntry | null>(null);
+  const [signedUrls, setSignedUrls] = useState<{ piece: string; selfie: string; doc: string | null } | null>(null);
   const [rejectModal, setRejectModal] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+
+  const openDetails = async (kyc: KycEntry) => {
+    setSelectedKyc(kyc);
+    setSignedUrls(null);
+    const [piece, selfie, doc] = await Promise.all([
+      getKycSignedUrl(KYC_BUCKETS.piece_identite, kyc.piece_identite_url || ''),
+      getKycSignedUrl(KYC_BUCKETS.selfie, kyc.selfie_url || ''),
+      getKycSignedUrl(KYC_BUCKETS.document_entreprise, kyc.document_entreprise_url || ''),
+    ]);
+    setSignedUrls({ piece: piece ?? '', selfie: selfie ?? '', doc });
+  };
 
   async function loadKyc() {
     const { data: kycs } = await supabase
       .from('kyc_verifications')
       .select('*')
+      .eq('type_compte', 'secretaire')
       .order('created_at', { ascending: false });
 
     if (!kycs) return;
@@ -170,23 +184,21 @@ export default function AdminKycPage() {
               <div key={kyc.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
                 <div className="p-5 flex flex-col md:flex-row justify-between items-start gap-4">
                   <div className="flex items-center gap-4">
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold ${
-                      kyc.type_compte === 'entreprise' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'
-                    }`}>
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold bg-emerald-100 text-emerald-700`}>
                       {kyc.prenom.charAt(0).toUpperCase()}
                     </div>
                     <div>
                       <h3 className="font-black text-slate-900 tracking-tight">{kyc.prenom} {kyc.nom_naissance}</h3>
                       <p className="text-xs text-slate-500 font-medium">{kyc.user_email}</p>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        {kyc.type_compte === 'entreprise' ? '🏢 Entreprise' : '👩‍💻 Secrétaire'} · Soumis le {new Date(kyc.created_at).toLocaleDateString('fr-FR')}
+                        👩‍💻 Secrétaire · Soumis le {new Date(kyc.created_at).toLocaleDateString('fr-FR')}
                       </p>
                     </div>
                   </div>
 
                   <div className="flex gap-2 flex-wrap">
                     <button
-                      onClick={() => setSelectedKyc(kyc)}
+                      onClick={() => openDetails(kyc)}
                       className="px-4 py-2 rounded-full text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 transition"
                     >
                       Voir détails
@@ -225,13 +237,13 @@ export default function AdminKycPage() {
 
       {/* Modale détails */}
       {selectedKyc && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[100]" onClick={() => setSelectedKyc(null)}>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[100]" onClick={() => { setSelectedKyc(null); setSignedUrls(null); }}>
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50 sticky top-0">
               <h3 className="text-lg font-black tracking-tight text-slate-900">
                 Dossier KYC — {selectedKyc.prenom} {selectedKyc.nom_naissance}
               </h3>
-              <button onClick={() => setSelectedKyc(null)} className="text-slate-400 hover:text-slate-900 text-2xl font-light">&times;</button>
+              <button onClick={() => { setSelectedKyc(null); setSignedUrls(null); }} className="text-slate-400 hover:text-slate-900 text-2xl font-light">&times;</button>
             </div>
             <div className="p-6 space-y-6">
               <div className="grid grid-cols-2 gap-4">
@@ -262,24 +274,36 @@ export default function AdminKycPage() {
 
               <div>
                 <p className="text-sm font-bold text-slate-700 mb-2">📄 Pièce d&apos;identité</p>
-                <a href={selectedKyc.piece_identite_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-sm font-bold hover:underline">
-                  Voir le document →
-                </a>
+                {signedUrls?.piece ? (
+                  <a href={signedUrls.piece} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-sm font-bold hover:underline">
+                    Voir le document →
+                  </a>
+                ) : (
+                  <span className="text-xs text-slate-400 font-medium">Chargement…</span>
+                )}
               </div>
 
               <div>
                 <p className="text-sm font-bold text-slate-700 mb-2">🤳 Selfie</p>
-                <a href={selectedKyc.selfie_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-sm font-bold hover:underline">
-                  Voir le selfie →
-                </a>
+                {signedUrls?.selfie ? (
+                  <a href={signedUrls.selfie} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-sm font-bold hover:underline">
+                    Voir le selfie →
+                  </a>
+                ) : (
+                  <span className="text-xs text-slate-400 font-medium">Chargement…</span>
+                )}
               </div>
 
               {selectedKyc.document_entreprise_url && (
                 <div>
                   <p className="text-sm font-bold text-slate-700 mb-2">🏢 Document entreprise</p>
-                  <a href={selectedKyc.document_entreprise_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-sm font-bold hover:underline">
-                    Voir le document →
-                  </a>
+                  {signedUrls?.doc ? (
+                    <a href={signedUrls.doc} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-sm font-bold hover:underline">
+                      Voir le document →
+                    </a>
+                  ) : (
+                    <span className="text-xs text-slate-400 font-medium">Chargement…</span>
+                  )}
                 </div>
               )}
 
@@ -293,14 +317,14 @@ export default function AdminKycPage() {
               {selectedKyc.statut === 'pending' && (
                 <div className="flex gap-3 pt-4 border-t border-slate-100">
                   <button
-                    onClick={() => { handleApprove(selectedKyc.id); setSelectedKyc(null); }}
+                    onClick={() => { handleApprove(selectedKyc.id); setSelectedKyc(null); setSignedUrls(null); }}
                     disabled={acting === selectedKyc.id}
                     className="flex-1 py-3 rounded-full bg-emerald-600 text-white font-extrabold hover:bg-emerald-700 transition shadow-lg disabled:opacity-50"
                   >
                     ✓ Approuver
                   </button>
                   <button
-                    onClick={() => { setRejectModal(selectedKyc.id); setSelectedKyc(null); }}
+                    onClick={() => { setRejectModal(selectedKyc.id); setSelectedKyc(null); setSignedUrls(null); }}
                     disabled={acting === selectedKyc.id}
                     className="flex-1 py-3 rounded-full bg-red-50 text-red-600 font-bold border border-red-200 hover:bg-red-100 transition disabled:opacity-50"
                   >
