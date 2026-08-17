@@ -100,11 +100,14 @@ const getAdminDashboardDataCached = unstable_cache(
       kycWithNames = kycPending.map(k => ({ ...k, nom: userMap.get(k.user_id) || 'Utilisateur' }));
     }
 
-    let missionsWithNames: any[] = [];
+    type MissionWithName = NonNullable<typeof newMissions>[number] & { entreprise_nom: string };
+    let missionsWithNames: MissionWithName[] = [];
     if (newMissions && newMissions.length > 0) {
       const { data: ents } = await supabase.from('profils').select('id, nom').in('id', newMissions.map(m => m.entreprise_id));
       const entMap = new Map((ents ?? []).map(e => [e.id, e.nom]));
-      missionsWithNames = newMissions.map(m => ({ ...m, entreprise_nom: entMap.get(m.entreprise_id) }));
+      // Repli explicite : une entreprise supprimée affichait « undefined »
+      // dans la console d'administration.
+      missionsWithNames = newMissions.map(m => ({ ...m, entreprise_nom: entMap.get(m.entreprise_id) || 'Entreprise' }));
     }
 
     return {

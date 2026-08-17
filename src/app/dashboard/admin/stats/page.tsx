@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
-import Link from '@/components/Link';
 import { Breadcrumbs } from '@/components/ui';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { exportToCSV, exportToPDF } from '@/lib/export';

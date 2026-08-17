@@ -4,7 +4,7 @@ import { kycSchema, type KycFormData } from '@/lib/validations';
 describe('kycSchema', () => {
   const validData: KycFormData = {
     prenom: 'Marie',
-    nom_naissance: 'Dupont',
+    nom: 'Dupont',
     date_naissance: '1990-05-15',
     nationalite: 'Ivoirienne',
     nom_entreprise: 'SAS Test',
@@ -19,7 +19,7 @@ describe('kycSchema', () => {
     it('accepts minimal data (only required fields)', () => {
       const result = kycSchema.safeParse({
         prenom: 'Marie',
-        nom_naissance: 'Dupont',
+        nom: 'Dupont',
         date_naissance: '1990-05-15',
       });
       expect(result.success).toBe(true);
@@ -28,7 +28,7 @@ describe('kycSchema', () => {
     it('accepts empty optional fields', () => {
       const result = kycSchema.safeParse({
         prenom: 'Marie',
-        nom_naissance: 'Dupont',
+        nom: 'Dupont',
         date_naissance: '1990-05-15',
         nationalite: '',
         nom_entreprise: '',
@@ -67,22 +67,22 @@ describe('kycSchema', () => {
     });
   });
 
-  describe('nom_naissance validation', () => {
-    it('rejects empty nom_naissance', () => {
-      const result = kycSchema.safeParse({ ...validData, nom_naissance: '' });
+  describe('nom validation', () => {
+    it('rejects empty nom', () => {
+      const result = kycSchema.safeParse({ ...validData, nom: '' });
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.error.issues[0].message).toContain('Nom de naissance requis');
+        expect(result.error.issues[0].message).toContain('Nom requis');
       }
     });
 
     it('accepts compound names', () => {
-      const result = kycSchema.safeParse({ ...validData, nom_naissance: 'Kouassi-Mensah' });
+      const result = kycSchema.safeParse({ ...validData, nom: 'Kouassi-Mensah' });
       expect(result.success).toBe(true);
     });
 
-    it('rejects nom_naissance > 100 chars', () => {
-      const result = kycSchema.safeParse({ ...validData, nom_naissance: 'B'.repeat(101) });
+    it('rejects nom > 100 chars', () => {
+      const result = kycSchema.safeParse({ ...validData, nom: 'B'.repeat(101) });
       expect(result.success).toBe(false);
     });
   });
@@ -147,7 +147,7 @@ describe('kycSchema', () => {
       if (result.success) {
         const data: KycFormData = result.data;
         expect(typeof data.prenom).toBe('string');
-        expect(typeof data.nom_naissance).toBe('string');
+        expect(typeof data.nom).toBe('string');
         expect(typeof data.date_naissance).toBe('string');
       }
     });

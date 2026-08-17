@@ -14,8 +14,10 @@ async function getUser() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     { cookies: { getAll() { return cookieStore.getAll(); } } }
   );
-  const { data: { session } } = await supabase.auth.getSession();
-  return { user: session?.user, supabase };
+  // getUser() valide le JWT auprès de Supabase ; getSession() se contente de
+  // lire le cookie, ce qui n'est pas une preuve d'authentification côté serveur.
+  const { data: { user } } = await supabase.auth.getUser();
+  return { user, supabase };
 }
 
 export default async function DashboardAdminPage() {
@@ -23,7 +25,9 @@ export default async function DashboardAdminPage() {
   if (!user) redirect('/connexion');
 
   const { data: profil } = await supabase.from('profils').select('role').eq('id', user.id).maybeSingle();
-  if (profil && profil.role !== 'admin') redirect('/dashboard');
+  // Un profil absent ou non-admin est refusé : l'ancien test laissait passer
+  // le cas « aucun profil trouvé ».
+  if (profil?.role !== 'admin') redirect('/dashboard');
 
   const data = await getAdminDashboardData(user.id);
 

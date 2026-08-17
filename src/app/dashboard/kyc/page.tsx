@@ -8,10 +8,11 @@ import { toast } from '@/components/Toast';
 import { Button, Breadcrumbs } from '@/components/ui';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { roleHome, type Role } from '@/lib/roleStore';
 
 type FormData = {
-  prenom: string;
-  nom_naissance: string;
+  prenoms: string;
+  nom: string;
   date_naissance: string;
   nationalite: string;
 };
@@ -25,13 +26,13 @@ type FieldExplanation = {
 
 const FIELD_EXPLANATIONS: FieldExplanation[] = [
   {
-    label: 'Prénom',
+    label: 'Prénoms',
     description: 'Le(s) prénom(s) tel qu\'il apparaît(ssent) sur votre pièce d\'identité officielle.',
     icon: '👤',
     required: true,
   },
   {
-    label: 'Nom de naissance',
+    label: 'Nom',
     description: 'Votre nom de famille tel qu\'il figure sur votre acte de naissance et votre pièce d\'identité.',
     icon: '📋',
     required: true,
@@ -64,8 +65,8 @@ export default function KycPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const [form, setForm] = useState<FormData>({
-    prenom: '',
-    nom_naissance: '',
+    prenoms: '',
+    nom: '',
     date_naissance: '',
     nationalite: '',
   });
@@ -75,34 +76,44 @@ export default function KycPage() {
 
   useEffect(() => {
     const fetchData = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { router.push('/connexion'); return; }
+      // Le `finally` garantit la sortie de l'écran de chargement : sur erreur
+      // réseau, la page restait bloquée sur le spinner indéfiniment.
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) { router.push('/connexion'); return; }
 
-      setUserId(session.user.id);
+        setUserId(session.user.id);
 
-      const { data: profil } = await supabase
-        .from('profils')
-        .select('role, nom')
-        .eq('id', session.user.id)
-        .maybeSingle();
+        const { data: profil } = await supabase
+          .from('profils')
+          .select('role, nom')
+          .eq('id', session.user.id)
+          .maybeSingle();
 
-      if (profil) {
-        if (profil.role === 'entreprise') {
-          router.push('/dashboard/entreprise');
-          return;
+        if (profil) {
+          // La vérification d'identité ne concerne que les secrétaires.
+          // Les entreprises étaient déjà redirigées ; les administrateurs, non :
+          // ils tombaient sur le formulaire KYC destiné aux secrétaires.
+          if (profil.role !== 'secretaire') {
+            router.replace(roleHome(profil.role as Role));
+            return;
+          }
+          setForm(prev => ({ ...prev, prenoms: profil.nom || '' }));
         }
-        setForm(prev => ({ ...prev, prenom: profil.nom || '' }));
+
+        const { data: kyc } = await supabase
+          .from('kyc_verifications')
+          .select('statut, motif_rejet')
+          .eq('user_id', session.user.id)
+          .maybeSingle();
+
+        if (kyc) setExistingKyc(kyc as ExistingKyc);
+      } catch (error) {
+        console.error('[kyc] Chargement échoué :', error);
+        toast.error('Impossible de charger votre dossier. Veuillez réessayer.');
+      } finally {
+        setLoading(false);
       }
-
-      const { data: kyc } = await supabase
-        .from('kyc_verifications')
-        .select('statut, motif_rejet')
-        .eq('user_id', session.user.id)
-        .maybeSingle();
-
-      if (kyc) setExistingKyc(kyc as ExistingKyc);
-
-      setLoading(false);
     };
     fetchData();
   }, [router]);
@@ -125,7 +136,7 @@ export default function KycPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!form.prenom.trim() || !form.nom_naissance.trim() || !form.date_naissance) {
+    if (!form.prenoms.trim() || !form.nom.trim() || !form.date_naissance) {
       toast.error('Veuillez remplir tous les champs obligatoires.');
       return;
     }
@@ -157,14 +168,19 @@ export default function KycPage() {
     const kycData = {
       user_id: userId,
       statut: 'pending',
-      prenom: form.prenom.trim(),
-      nom_naissance: form.nom_naissance.trim(),
+      prenom: form.prenoms.trim(),
+      nom: form.nom.trim(),
       date_naissance: form.date_naissance,
       nationalite: form.nationalite.trim() || null,
       type_compte: 'secretaire',
       piece_identite_url: identiteUrl,
       selfie_url: selfieUrl,
       motif_rejet: null,
+      // Date de cette soumission. Sans elle, un dossier refusé puis corrigé
+      // conservait la date du premier envoi : l'administrateur voyait un
+      // dossier « soumis » des semaines plus tôt et le classait en bas de
+      // liste, alors qu'il venait d'être retravaillé.
+      derniere_soumission_at: new Date().toISOString(),
     };
 
     const { data: existing } = await supabase
@@ -173,9 +189,20 @@ export default function KycPage() {
       .eq('user_id', userId)
       .maybeSingle();
 
-    const { error } = existing?.id
-      ? await supabase.from('kyc_verifications').update(kycData).eq('user_id', userId)
-      : await supabase.from('kyc_verifications').insert(kycData);
+    const submit = (payload: Record<string, unknown>) =>
+      existing?.id
+        ? supabase.from('kyc_verifications').update(payload).eq('user_id', userId)
+        : supabase.from('kyc_verifications').insert(payload);
+
+    let { error } = await submit(kycData);
+
+    // Repli si la migration 008 n'a pas encore été appliquée : le dossier doit
+    // partir malgré tout, quitte à perdre la date de resoumission.
+    if (error && (error.code === 'PGRST204' || error.code === '42703') &&
+        error.message?.includes('derniere_soumission_at')) {
+      const { derniere_soumission_at: _ignored, ...sansDate } = kycData;
+      ({ error } = await submit(sansDate));
+    }
 
     if (error) {
       toast.error('Erreur : ' + error.message);
@@ -190,8 +217,8 @@ export default function KycPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId,
-          prenom: form.prenom.trim(),
-          nom: form.nom_naissance.trim(),
+          prenom: form.prenoms.trim(),
+          nom: form.nom.trim(),
           type: 'secretaire',
         }),
       });
@@ -240,6 +267,30 @@ export default function KycPage() {
     );
   }
 
+  // KYC approuvé — sans cet écran, un dossier déjà validé réaffichait le
+  // formulaire vierge, dont l'envoi repassait le statut à « pending ».
+  if (existingKyc?.statut === 'approved') {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans antialiased">
+        <div className="max-w-md w-full bg-white rounded-3xl border border-slate-100 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.08)] p-8 text-center">
+          <div className="text-5xl mb-4">✅</div>
+          <h1 className="text-2xl font-black tracking-tight text-slate-900 mb-2">
+            Identité vérifiée
+          </h1>
+          <p className="text-slate-500 font-medium text-sm mb-6">
+            Votre dossier a été approuvé. Votre profil est visible par les entreprises.
+          </p>
+          <Link
+            href="/dashboard/secretaire"
+            className="block w-full py-3.5 rounded-full bg-blue-600 text-white font-bold hover:bg-blue-700 transition text-sm"
+          >
+            Accéder à mon tableau de bord
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   // KYC rejeté
   if (existingKyc?.statut === 'rejected') {
     return (
@@ -270,9 +321,9 @@ export default function KycPage() {
                     Informations personnelles
                   </h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {FIELD_EXPLANATIONS.filter(f => ['Prénom', 'Nom de naissance', 'Date de naissance', 'Nationalité'].includes(f.label)).map(field => {
-                      const fieldKey = field.label === 'Prénom' ? 'prenom'
-                        : field.label === 'Nom de naissance' ? 'nom_naissance'
+                    {FIELD_EXPLANATIONS.filter(f => ['Prénoms', 'Nom', 'Date de naissance', 'Nationalité'].includes(f.label)).map(field => {
+                      const fieldKey = field.label === 'Prénoms' ? 'prenoms'
+                        : field.label === 'Nom' ? 'nom'
                         : field.label === 'Date de naissance' ? 'date_naissance'
                         : 'nationalite';
                       return (
@@ -299,7 +350,7 @@ export default function KycPage() {
                     <span className="bg-blue-100 text-blue-700 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold">2</span>
                     Pièce d&apos;identité *
                   </h2>
-                  <PhotoCapture onCapture={setPieceIdentite} label="Importer votre pièce d'identité" sublabel="JPG, PNG ou PDF (max 5 Mo)" icon="📄" />
+                  <PhotoCapture onCapture={setPieceIdentite} label="Importer votre pièce d'identité" sublabel="JPG, PNG ou PDF (max 5 Mo)" icon="📄" accept="image/*,application/pdf" />
                 </section>
 
                 <section>
@@ -344,9 +395,9 @@ export default function KycPage() {
                 Informations personnelles
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {FIELD_EXPLANATIONS.filter(f => ['Prénom', 'Nom de naissance', 'Date de naissance', 'Nationalité'].includes(f.label)).map(field => {
-                  const fieldKey = field.label === 'Prénom' ? 'prenom'
-                    : field.label === 'Nom de naissance' ? 'nom_naissance'
+                {FIELD_EXPLANATIONS.filter(f => ['Prénoms', 'Nom', 'Date de naissance', 'Nationalité'].includes(f.label)).map(field => {
+                  const fieldKey = field.label === 'Prénoms' ? 'prenoms'
+                    : field.label === 'Nom' ? 'nom'
                     : field.label === 'Date de naissance' ? 'date_naissance'
                     : 'nationalite';
                   return (
@@ -374,7 +425,7 @@ export default function KycPage() {
                 Pièce d&apos;identité *
               </h2>
               <p className="text-xs text-slate-500 font-medium mb-3">Carte nationale d&apos;identité, passeport ou permis de conduire.</p>
-              <PhotoCapture onCapture={setPieceIdentite} label="Importer votre pièce d'identité" sublabel="JPG, PNG ou PDF (max 5 Mo)" icon="📄" />
+              <PhotoCapture onCapture={setPieceIdentite} label="Importer votre pièce d'identité" sublabel="JPG, PNG ou PDF (max 5 Mo)" icon="📄" accept="image/*,application/pdf" />
             </section>
 
             <section>

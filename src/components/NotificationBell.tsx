@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from '@/components/Toast';
 import Link from '@/components/Link';
@@ -27,8 +27,64 @@ const TYPE_STYLES: Record<string, { icon: string; bg: string; text: string }> = 
   match:   { icon: '🤝', bg: 'bg-emerald-100', text: 'text-emerald-600' },
 };
 
+// Formes minimales des lignes reçues via Supabase Realtime, en remplacement
+// des `any` : elles ne sont pas typées par le client.
+type DbNotificationRow = { id: string; type: string; title: string; message: string | null; link: string | null; created_at: string };
+type MessageRow = { id: number; sender_id: string; content: string | null; created_at: string; read: boolean };
+type CandidatureRow = { id: number; mission_id: number; secretaire_id: string; created_at: string };
+type OffreRow = { id: number; entreprise_id: string; created_at: string };
+type KycRow = { user_id: string; statut: string; created_at: string; updated_at: string | null };
+
+const excerpt = (text: string | null | undefined, max = 60) => {
+  const value = text ?? '';
+  return value.length > max ? `${value.slice(0, max)}...` : value;
+};
+
+// Préférences enregistrées depuis /dashboard/notifications. Elles étaient
+// sauvegardées en base mais aucun code ne les lisait : les basculer n'avait
+// donc aucun effet. Chaque type de notification est ici rattaché à sa clé.
+type NotificationPrefs = {
+  messages: boolean;
+  candidatures: boolean;
+  offres: boolean;
+  kyc: boolean;
+  systeme: boolean;
+};
+
+const DEFAULT_PREFS: NotificationPrefs = {
+  messages: true,
+  candidatures: true,
+  offres: true,
+  kyc: true,
+  systeme: true,
+};
+
+/**
+ * `match` regroupe les candidatures (côté entreprise/admin) et les offres
+ * (côté secrétaire) : la préférence applicable dépend donc du rôle.
+ */
+function isTypeEnabled(
+  type: NotificationItem['type'],
+  role: Props['role'],
+  prefs: NotificationPrefs
+): boolean {
+  switch (type) {
+    case 'message':
+      return prefs.messages;
+    case 'kyc':
+      return prefs.kyc;
+    case 'mission':
+      return prefs.systeme;
+    case 'match':
+      return role === 'secretaire' ? prefs.offres : prefs.candidatures;
+    default:
+      return true;
+  }
+}
+
 export default function NotificationBell({ userId, role }: Props) {
   const [items, setItems] = useState<NotificationItem[]>([]);
+  const [prefs, setPrefs] = useState<NotificationPrefs>(DEFAULT_PREFS);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const prevCountRef = useRef(0);
@@ -40,9 +96,47 @@ export default function NotificationBell({ userId, role }: Props) {
     let isMounted = true;
     const subId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
+    // Les préférences sont chargées avant tout : elles décident de ce qui est
+    // affiché et comptabilisé dans la pastille.
+    const fetchPrefs = async () => {
+      const { data } = await supabase
+        .from('profils')
+        .select('notification_prefs')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (isMounted && data?.notification_prefs && typeof data.notification_prefs === 'object') {
+        setPrefs({ ...DEFAULT_PREFS, ...(data.notification_prefs as Partial<NotificationPrefs>) });
+      }
+    };
+
+    void fetchPrefs();
+
     const fetchInitial = async () => {
       try {
         const all: NotificationItem[] = [];
+
+        // Notifications from DB (kyc rejection/approval emails)
+        const { data: dbNotifs } = await supabase
+          .from('notifications')
+          .select('id, type, title, message, link, read, created_at')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (dbNotifs?.length) {
+          for (const n of dbNotifs) {
+            all.push({
+              id: `db-${n.id}`,
+              type: n.type as NotificationItem['type'],
+              title: n.title,
+              body: excerpt(n.message),
+              href: n.link || '/dashboard/secretaire',
+              read: n.read,
+              created_at: n.created_at,
+            });
+          }
+        }
 
         // Messages non lus
         const { data: unreadMsgs } = await supabase
@@ -55,7 +149,7 @@ export default function NotificationBell({ userId, role }: Props) {
 
         if (unreadMsgs?.length) {
           const senderIds = [...new Set(unreadMsgs.map(m => m.sender_id))];
-          const { data: senders } = await supabase.from('profils').select('id, nom, role').in('id', senderIds);
+          const { data: senders } = await supabase.from('profils_publics').select('id, nom, role').in('id', senderIds);
           const senderMap = new Map((senders ?? []).map(s => [s.id, { nom: s.nom, role: s.role }]));
 
           for (const m of unreadMsgs) {
@@ -64,7 +158,7 @@ export default function NotificationBell({ userId, role }: Props) {
               id: `msg-${m.id}`,
               type: 'message',
               title: role === 'admin' ? `Message de ${sender?.nom || 'Utilisateur'}` : 'Message de l\'administration',
-              body: m.content.length > 60 ? m.content.slice(0, 60) + '...' : m.content,
+              body: excerpt(m.content),
               href: role === 'admin' ? '/dashboard/admin/messages' : '/dashboard/messages',
               read: false,
               created_at: m.created_at,
@@ -83,7 +177,7 @@ export default function NotificationBell({ userId, role }: Props) {
 
           if (pendingKycs?.length) {
             const kycUserIds = pendingKycs.map(k => k.user_id);
-            const { data: users } = await supabase.from('profils').select('id, nom').in('id', kycUserIds);
+            const { data: users } = await supabase.from('profils_publics').select('id, nom').in('id', kycUserIds);
             const userMap = new Map((users ?? []).map(u => [u.id, u.nom]));
 
             for (const k of pendingKycs) {
@@ -109,7 +203,7 @@ export default function NotificationBell({ userId, role }: Props) {
 
           if (recentMissions?.length) {
             const entIds = recentMissions.map(m => m.entreprise_id);
-            const { data: ents } = await supabase.from('profils').select('id, nom').in('id', entIds);
+            const { data: ents } = await supabase.from('profils_publics').select('id, nom').in('id', entIds);
             const entMap = new Map((ents ?? []).map(e => [e.id, e.nom]));
 
             for (const m of recentMissions) {
@@ -143,7 +237,7 @@ export default function NotificationBell({ userId, role }: Props) {
 
             if (newCands?.length) {
               const secIds = [...new Set(newCands.map(c => c.secretaire_id))];
-              const { data: secs } = await supabase.from('profils').select('id, nom').in('id', secIds);
+              const { data: secs } = await supabase.from('profils_publics').select('id, nom').in('id', secIds);
               const secMap = new Map((secs ?? []).map(s => [s.id, s.nom]));
               const missionMap = new Map(adminMissions.map(m => [m.id, m.titre]));
 
@@ -165,7 +259,7 @@ export default function NotificationBell({ userId, role }: Props) {
         if (role === 'secretaire') {
           const { data: myKyc } = await supabase
             .from('kyc_verifications')
-            .select('statut, updated_at')
+            .select('statut, updated_at, created_at')
             .eq('user_id', userId)
             .maybeSingle();
 
@@ -179,7 +273,10 @@ export default function NotificationBell({ userId, role }: Props) {
                 : 'Votre vérification d\'identité a été refusée. Veuillez soumettre de nouveaux documents.',
               href: '/dashboard/kyc',
               read: true,
-              created_at: myKyc.updated_at,
+              // `updated_at` est null tant que le dossier n'a pas été rejugé :
+              // sans repli, la notification s'affichait datée du 01/01/1970 et
+              // se retrouvait toujours en bas de la liste.
+              created_at: myKyc.updated_at ?? myKyc.created_at,
             });
           }
 
@@ -214,7 +311,7 @@ export default function NotificationBell({ userId, role }: Props) {
 
           if (offres?.length) {
             const entIds = offres.map(o => o.entreprise_id);
-            const { data: ents } = await supabase.from('profils').select('id, nom').in('id', entIds);
+            const { data: ents } = await supabase.from('profils_publics').select('id, nom').in('id', entIds);
             const entMap = new Map((ents ?? []).map(e => [e.id, e.nom]));
 
             for (const o of offres) {
@@ -249,7 +346,7 @@ export default function NotificationBell({ userId, role }: Props) {
 
             if (newCands?.length) {
               const secIds = [...new Set(newCands.map(c => c.secretaire_id))];
-              const { data: secs } = await supabase.from('profils').select('id, nom').in('id', secIds);
+              const { data: secs } = await supabase.from('profils_publics').select('id, nom').in('id', secIds);
               const secMap = new Map((secs ?? []).map(s => [s.id, s.nom]));
               const missionMap = new Map(missions.map(m => [m.id, m.titre]));
 
@@ -287,13 +384,34 @@ export default function NotificationBell({ userId, role }: Props) {
     // Supabase Realtime subscriptions — all channels pushed to ref BEFORE subscribe
     const channels: ReturnType<typeof supabase.channel>[] = [];
 
+    // Notifications from DB (realtime)
+    const dbNotifsChannel = supabase
+      .channel(`notifications-db-${userId}-${subId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` }, (payload) => {
+        const n = payload.new as DbNotificationRow;
+        setItems(prev => {
+          const exists = prev.some(i => i.id === `db-${n.id}`);
+          if (exists) return prev;
+          return [{
+            id: `db-${n.id}`,
+            type: n.type as NotificationItem['type'],
+            title: n.title,
+            body: excerpt(n.message),
+            href: n.link || '/dashboard/secretaire',
+            read: false,
+            created_at: n.created_at,
+          }, ...prev].slice(0, 20);
+        });
+      });
+    channels.push(dbNotifsChannel);
+
     // Messages
     const messagesChannel = supabase
       .channel(`notifications-messages-${userId}-${subId}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `receiver_id=eq.${userId}` }, async (payload) => {
-        const m = payload.new as any;
+        const m = payload.new as MessageRow;
         if (m.read) return;
-        const { data: sender } = await supabase.from('profils').select('nom, role').eq('id', m.sender_id).single();
+        const { data: sender } = await supabase.from('profils_publics').select('nom, role').eq('id', m.sender_id).maybeSingle();
         setItems(prev => {
           const exists = prev.some(i => i.id === `msg-${m.id}`);
           if (exists) return prev;
@@ -301,7 +419,7 @@ export default function NotificationBell({ userId, role }: Props) {
             id: `msg-${m.id}`,
             type: 'message' as const,
             title: role === 'admin' ? `Message de ${sender?.nom || 'Utilisateur'}` : 'Message de l\'administration',
-            body: m.content.length > 60 ? m.content.slice(0, 60) + '...' : m.content,
+            body: excerpt(m.content),
             href: role === 'admin' ? '/dashboard/admin/messages' : '/dashboard/messages',
             read: false,
             created_at: m.created_at,
@@ -315,12 +433,12 @@ export default function NotificationBell({ userId, role }: Props) {
       const candsChannel = supabase
         .channel(`notifications-candidatures-${userId}-${subId}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'candidatures', filter: `statut=eq.en_attente` }, async (payload) => {
-          const c = payload.new as any;
+          const c = payload.new as CandidatureRow;
           const { data: mission } = await supabase.from('missions').select('entreprise_id, titre').eq('id', c.mission_id).single();
           if (!mission) return;
           if (role === 'entreprise' && mission.entreprise_id !== userId) return;
 
-          const { data: secretaire } = await supabase.from('profils').select('nom').eq('id', c.secretaire_id).single();
+          const { data: secretaire } = await supabase.from('profils_publics').select('nom').eq('id', c.secretaire_id).maybeSingle();
           setItems(prev => [{
             id: `match-${c.id}`,
             type: 'match' as const,
@@ -339,8 +457,8 @@ export default function NotificationBell({ userId, role }: Props) {
       const offresChannel = supabase
         .channel(`notifications-offres-${userId}-${subId}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'offres', filter: `secretaire_id=eq.${userId}` }, async (payload) => {
-          const o = payload.new as any;
-          const { data: entreprise } = await supabase.from('profils').select('nom').eq('id', o.entreprise_id).single();
+          const o = payload.new as OffreRow;
+          const { data: entreprise } = await supabase.from('profils_publics').select('nom').eq('id', o.entreprise_id).maybeSingle();
           setItems(prev => [{
             id: `match-${o.id}`,
             type: 'match' as const,
@@ -359,8 +477,8 @@ export default function NotificationBell({ userId, role }: Props) {
       const kycChannel = supabase
         .channel(`notifications-kyc-admin-${subId}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'kyc_verifications', filter: 'statut=eq.pending' }, async (payload) => {
-          const k = payload.new as any;
-          const { data: user } = await supabase.from('profils').select('nom').eq('id', k.user_id).single();
+          const k = payload.new as KycRow;
+          const { data: user } = await supabase.from('profils_publics').select('nom').eq('id', k.user_id).maybeSingle();
           setItems(prev => [{
             id: `kyc-${k.user_id}`,
             type: 'kyc' as const,
@@ -376,7 +494,7 @@ export default function NotificationBell({ userId, role }: Props) {
       const kycChannel = supabase
         .channel(`notifications-kyc-${userId}-${subId}`)
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'kyc_verifications', filter: `user_id=eq.${userId}` }, async (payload) => {
-          const k = payload.new as any;
+          const k = payload.new as KycRow;
           if (k.statut === 'approved' || k.statut === 'rejected') {
             setItems(prev => [{
               id: `kyc-${userId}`,
@@ -387,7 +505,7 @@ export default function NotificationBell({ userId, role }: Props) {
                 : 'Votre vérification d\'identité a été refusée. Veuillez soumettre de nouveaux documents.',
               href: '/dashboard/kyc',
               read: true,
-              created_at: k.updated_at,
+              created_at: k.updated_at ?? k.created_at,
             }, ...prev].slice(0, 20));
           }
         });
@@ -404,20 +522,66 @@ export default function NotificationBell({ userId, role }: Props) {
     };
   }, [userId, role]);
 
-  const unreadCount = items.filter(n => !n.read).length;
+  // Le panneau se ferme au clic extérieur et à la touche Échap : le `ref` était
+  // posé sur le conteneur mais n'était relié à aucun gestionnaire.
+  useEffect(() => {
+    if (!open) return;
+
+    const onPointerDown = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  // Seules les catégories activées par l'utilisateur sont affichées et
+  // comptabilisées.
+  const visibleItems = useMemo(
+    () => items.filter(item => isTypeEnabled(item.type, role, prefs)),
+    [items, role, prefs]
+  );
+
+  const unreadCount = visibleItems.filter(n => !n.read).length;
 
   const markAllRead = async () => {
-    const msgItems = items.filter(n => n.type === 'message' && !n.read);
-    if (msgItems.length > 0) {
-      const ids = msgItems.map(n => parseInt(n.id.replace('msg-', '')));
-      if (!isNaN(ids[0])) {
-        try {
-          await supabase.from('messages').update({ read: true }).in('id', ids);
-          setItems(prev => prev.map(n => ({ ...n, read: true })));
-        } catch { toast.error("Erreur lors de la mise à jour des notifications."); }
+    const unread = visibleItems.filter(n => !n.read);
+    if (unread.length === 0) return;
+
+    // `messages.id` est un UUID : le convertir en nombre donnait NaN, tous les
+    // identifiants étaient écartés et la mise à jour n'était jamais envoyée.
+    // « Tout marquer lu » ne marquait donc aucun message en base.
+    const messageIds = unread
+      .filter(n => n.id.startsWith('msg-'))
+      .map(n => n.id.slice(4))
+      .filter(Boolean);
+
+    // Les notifications persistées en base doivent aussi être marquées lues,
+    // sinon elles réapparaissaient comme non lues à chaque rechargement.
+    const dbIds = unread
+      .filter(n => n.id.startsWith('db-'))
+      .map(n => n.id.slice(3));
+
+    try {
+      const updates = [];
+      if (messageIds.length > 0) {
+        updates.push(supabase.from('messages').update({ read: true }).in('id', messageIds));
       }
-    } else {
+      if (dbIds.length > 0) {
+        updates.push(supabase.from('notifications').update({ read: true }).in('id', dbIds));
+      }
+      await Promise.all(updates);
       setItems(prev => prev.map(n => ({ ...n, read: true })));
+      prevCountRef.current = 0;
+    } catch {
+      toast.error("Erreur lors de la mise à jour des notifications.");
     }
   };
 
@@ -439,7 +603,7 @@ export default function NotificationBell({ userId, role }: Props) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 bg-white rounded-2xl border border-slate-100 shadow-[0_20px_50px_rgba(0,0,0,0.12)] z-50 overflow-hidden">
+        <div className="absolute right-0 top-full mt-2 w-[min(24rem,calc(100vw-2rem))] bg-white rounded-2xl border border-slate-100 shadow-[0_20px_50px_rgba(0,0,0,0.12)] z-50 overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
             <h3 className="font-black text-slate-900 text-sm tracking-tight">Notifications</h3>
             {unreadCount > 0 && (
@@ -449,11 +613,11 @@ export default function NotificationBell({ userId, role }: Props) {
             )}
           </div>
 
-          <div className="max-h-80 overflow-y-auto">
-            {items.length === 0 ? (
+          <div className="max-h-[min(20rem,60vh)] overflow-y-auto">
+            {visibleItems.length === 0 ? (
               <p className="p-6 text-center text-sm text-slate-400 font-medium">Aucune notification</p>
             ) : (
-              items.slice(0, 12).map(item => {
+              visibleItems.slice(0, 12).map(item => {
                 const style = TYPE_STYLES[item.type] || TYPE_STYLES.message;
                 return (
                   <Link

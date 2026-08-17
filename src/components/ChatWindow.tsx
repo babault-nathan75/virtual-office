@@ -18,7 +18,9 @@ import { useSwipeActions } from "@/hooks/useSwipeActions";
 import lamejs from "lamejs";
 
 type Message = {
-  id: number;
+  // UUID côté base, et non un entier : les identifiants de messages ne se
+  // comparent ni ne s'incrémentent.
+  id: string;
   sender_id: string;
   receiver_id: string;
   content: string;
@@ -30,7 +32,26 @@ type Message = {
   ephemeral: boolean;
   expires_at: string | null;
   created_at: string;
+  // Message cité (migration 006). Optionnel : les bases antérieures à cette
+  // migration renvoient simplement la colonne absente.
+  reply_to?: string | null;
 };
+
+/*
+ * Les messages en cours d'envoi reçoivent un identifiant local préfixé, seul
+ * moyen de les distinguer des messages persistés maintenant que les vrais
+ * identifiants sont des UUID. L'ancien procédé — un entier négatif comparé par
+ * `id < 0` — reposait sur la coercition d'un UUID en NaN.
+ */
+const OPTIMISTIC_PREFIX = 'optimistic-';
+
+function makeOptimisticId() {
+  return `${OPTIMISTIC_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isOptimistic(id: string) {
+  return id.startsWith(OPTIMISTIC_PREFIX);
+}
 
 type Conversation = {
   otherId: string;
@@ -52,7 +73,7 @@ type Profile = {
 };
 
 type SearchHit = {
-  id: number;
+  id: string;
   sender_id: string;
   content: string;
   created_at: string;
@@ -299,6 +320,20 @@ function parseLegacyAttachment(content: string): MessageAttachment | null {
   };
 }
 
+/**
+ * Détecte une erreur PostgREST « colonne inconnue », afin de dégrader
+ * proprement lorsqu'une migration n'a pas encore été appliquée en base.
+ */
+function isMissingColumnError(error: unknown, column: string) {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: string; message?: string };
+  const message = candidate.message?.toLowerCase() || "";
+  return (
+    (candidate.code === "PGRST204" || candidate.code === "42703") &&
+    message.includes(column)
+  );
+}
+
 function resolveMessageAttachment(
   message: { content: string },
 ): MessageAttachment | null {
@@ -326,19 +361,6 @@ function messagePreview(message: { content: string }) {
   if (attachment.type.startsWith("audio/")) return "🎤 Message vocal";
   if (attachment.type.startsWith("image/")) return `🖼️ ${attachment.name}`;
   return `📎 ${attachment.name}`;
-}
-
-function isAttachmentSchemaError(error: unknown) {
-  if (!error || typeof error !== "object") return false;
-
-  const candidate = error as { code?: string; message?: string };
-  const message = candidate.message?.toLowerCase() || "";
-  return (
-    candidate.code === "PGRST204" ||
-    candidate.code === "42703" ||
-    (message.includes("schema cache") && message.includes("file_")) ||
-    (message.includes("column") && /file_(url|type|name)/.test(message))
-  );
 }
 
 function formatConversationDate(value: string) {
@@ -436,12 +458,12 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
   const [msgSearchResults, setMsgSearchResults] = useState<SearchHit[]>([]);
   const [showMsgSearch, setShowMsgSearch] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState<
-    number | null
+    string | null
   >(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [ephemeralMode, setEphemeralMode] = useState<number | null>(null);
   const [activeMessageActions, setActiveMessageActions] = useState<
-    number | null
+    string | null
   >(null);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [editingMsg, setEditingMsg] = useState<Message | null>(null);
@@ -472,7 +494,6 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
   const userSearchRequestRef = useRef(0);
   const messageSearchRequestRef = useRef(0);
   const draftsRef = useRef<Map<string, string>>(new Map());
-  const attachmentColumnsSupportedRef = useRef<boolean | null>(null);
 
   const {
     offset: swipeOffset,
@@ -617,7 +638,7 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
     }
 
     const { data: profils, error: profilsError } = await supabase
-      .from("profils")
+      .from("profils_publics")
       .select("id, nom, role")
       .in("id", otherIds);
 
@@ -1009,8 +1030,9 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
     }
 
     setSending(true);
-    const replyToId = replyingTo?.id || null;
     const currentEphemeralMode = ephemeralMode;
+    // Capturé avant la remise à zéro de `replyingTo` juste en dessous.
+    const replyToId = replyingTo?.id ?? null;
 
     setNewMessage("");
     draftsRef.current.delete(selectedConv.otherId);
@@ -1023,7 +1045,7 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
     });
 
     const optimisticMsg: Message = {
-      id: -Date.now(),
+      id: makeOptimisticId(),
       sender_id: currentUserId,
       receiver_id: selectedConv.otherId,
       content: contentToSend,
@@ -1037,6 +1059,7 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
         ? new Date(Date.now() + currentEphemeralMode).toISOString()
         : null,
       created_at: new Date().toISOString(),
+      reply_to: replyToId,
     };
 
     setMessages((previous) => [...previous, optimisticMsg]);
@@ -1056,12 +1079,29 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
       ).toISOString();
     }
 
+    // On ne cite qu'un message déjà persisté : un message optimiste n'existe
+    // pas encore en base et ne peut pas être référencé.
+    if (replyToId !== null && !isOptimistic(replyToId)) {
+      insertData.reply_to = replyToId;
+    }
+
     try {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("messages")
         .insert(insertData)
         .select("*")
         .single();
+
+      // Repli si la migration 006 n'a pas encore été appliquée : le message
+      // part sans sa citation plutôt que d'échouer complètement.
+      if (error && isMissingColumnError(error, "reply_to")) {
+        delete insertData.reply_to;
+        ({ data, error } = await supabase
+          .from("messages")
+          .insert(insertData)
+          .select("*")
+          .single());
+      }
 
       if (error) throw error;
 
@@ -1248,8 +1288,8 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
 
     try {
       let profilesQuery = supabase
-        .from("profils")
-        .select("id, nom, role, email")
+        .from("profils_publics")
+        .select("id, nom, role")
         .neq("id", currentUserId)
         .in(
           "role",
@@ -1274,7 +1314,6 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
           id: profile.id,
           nom: profile.nom,
           role: profile.role,
-          email: profile.email ?? undefined,
         })),
       );
     } catch (error) {
@@ -1429,8 +1468,8 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
     setShowProfile(true);
 
     const { data: fullProfile, error } = await supabase
-      .from("profils")
-      .select("id, nom, role, email, telephone")
+      .from("profils_publics")
+      .select("id, nom, role")
       .eq("id", userId)
       .maybeSingle();
 
@@ -1445,8 +1484,6 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
         id: fullProfile.id,
         nom: fullProfile.nom,
         role: fullProfile.role,
-        email: fullProfile.email,
-        telephone: fullProfile.telephone,
       });
     }
 
@@ -1807,7 +1844,7 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
       return;
     }
     const { data } = await supabase
-      .from("profils")
+      .from("profils_publics")
       .select("id, nom, role")
       .ilike("nom", `%${q}%`)
       .limit(5);
@@ -1853,7 +1890,7 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
 
   const renderTicks = (msg: Message) => {
     if (msg.sender_id !== currentUserId) return null;
-    if (msg.id < 0) {
+    if (isOptimistic(msg.id)) {
       return (
         <span className="ml-1 inline-flex text-blue-100" title="Envoi en cours">
           <SpinnerIcon />
@@ -1948,6 +1985,22 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
         message.content.toLocaleLowerCase("fr-FR").includes(query),
     );
   }, [messages, msgSearch]);
+
+  // Index par identifiant : permet de retrouver le message cité par une
+  // réponse sans parcourir toute la liste à chaque bulle rendue.
+  const messagesById = useMemo(
+    () => new Map(messages.map((message) => [message.id, message])),
+    [messages],
+  );
+
+  // Fait défiler jusqu'au message cité et le met brièvement en évidence.
+  const jumpToMessage = useCallback((messageId: string) => {
+    const target = document.getElementById(`message-${messageId}`);
+    if (!target) return;
+    setHighlightedMessageId(messageId);
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => setHighlightedMessageId(null), 2200);
+  }, []);
 
   const retryLoad = async () => {
     setLoading(true);
@@ -2754,13 +2807,53 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
                               );
                             }}
                             className={`absolute top-1 h-8 w-8 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm ${
-                              message.id < 0 ? "hidden" : "grid sm:hidden"
+                              isOptimistic(message.id) ? "hidden" : "grid sm:hidden"
                             } ${isMine ? "right-full mr-1" : "left-full ml-1"}`}
                             aria-label="Actions du message"
                             aria-expanded={activeMessageActions === message.id}
                           >
                             <MoreIcon />
                           </button>
+
+                          {/* Citation du message auquel celui-ci répond.
+                              Cliquable : ramène au message d'origine. */}
+                          {(() => {
+                            if (!message.reply_to) return null;
+                            const quoted = messagesById.get(message.reply_to);
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => quoted && jumpToMessage(quoted.id)}
+                                disabled={!quoted}
+                                className={`mb-1.5 flex w-full flex-col items-start gap-0.5 rounded-lg border-l-[3px] px-2 py-1 text-left transition ${
+                                  isMine
+                                    ? "border-white/60 bg-white/15 hover:bg-white/25 disabled:hover:bg-white/15"
+                                    : "border-blue-400 bg-slate-50 hover:bg-slate-100 disabled:hover:bg-slate-50"
+                                } ${quoted ? "cursor-pointer" : "cursor-default"}`}
+                              >
+                                <span
+                                  className={`text-[10px] font-bold ${
+                                    isMine ? "text-white/80" : "text-blue-600"
+                                  }`}
+                                >
+                                  {quoted
+                                    ? quoted.sender_id === currentUserId
+                                      ? "Vous"
+                                      : selectedConv.otherNom
+                                    : "Message"}
+                                </span>
+                                <span
+                                  className={`line-clamp-2 text-xs ${
+                                    isMine ? "text-white/70" : "text-slate-500"
+                                  }`}
+                                >
+                                  {quoted
+                                    ? messagePreview(quoted)
+                                    : "Message indisponible"}
+                                </span>
+                              </button>
+                            );
+                          })()}
 
                           {attachment && (
                             <div className={messageText ? "mb-2" : ""}>
@@ -2985,7 +3078,7 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
                             className={`absolute ${
                               isMine ? "right-0" : "left-0"
                             } -top-10 z-10 items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-lg ${
-                              message.id < 0
+                              isOptimistic(message.id)
                                 ? "hidden"
                                 : activeMessageActions === message.id
                                   ? "flex"
@@ -3371,17 +3464,16 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
                   ))
                 ) : (
                   <>
-                    <ProfileField
-                      label="Adresse e-mail"
-                      value={activeProfile.email || "Non renseignée"}
-                    />
-                    <ProfileField
-                      label="Téléphone"
-                      value={activeProfile.telephone || "Non renseigné"}
-                    />
+                    {/* Les coordonnées ne sont plus partagées entre
+                        utilisateurs (migration 007) : les échanges passent
+                        par la messagerie. */}
                     <ProfileField
                       label="Rôle"
                       value={roleLabel(activeProfile.role)}
+                    />
+                    <ProfileField
+                      label="Coordonnées"
+                      value="Échanges via la messagerie"
                     />
                   </>
                 )}
@@ -3916,17 +4008,6 @@ function SpinnerIcon() {
   );
 }
 
-function PinIcon() {
-  return (
-    <Icon>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="m9 4 6 6M8 9l7-5 5 5-5 7M12 13l-8 8"
-      />
-    </Icon>
-  );
-}
 
 function CopyIcon() {
   return (
@@ -3949,17 +4030,6 @@ function ReplyIcon() {
   );
 }
 
-function SmileIcon() {
-  return (
-    <Icon>
-      <circle cx="12" cy="12" r="9" />
-      <path
-        strokeLinecap="round"
-        d="M8.5 10h.01M15.5 10h.01M8.5 14c1 1.4 2.2 2 3.5 2s2.5-.6 3.5-2"
-      />
-    </Icon>
-  );
-}
 
 function EditIcon() {
   return (
@@ -3973,13 +4043,3 @@ function EditIcon() {
   );
 }
 
-function TrashIcon() {
-  return (
-    <Icon>
-      <path
-        strokeLinecap="round"
-        d="M5 7h14M9 7V4h6v3M8 10v7M12 10v7M16 10v7M7 7l1 13h8l1-13"
-      />
-    </Icon>
-  );
-}

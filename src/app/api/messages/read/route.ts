@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { checkRateLimit } from '@/lib/rateLimit';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 import { z } from 'zod';
 
 const supabaseAdmin = createClient(
@@ -10,11 +10,13 @@ const supabaseAdmin = createClient(
 );
 
 const readSchema = z.object({
-  messageIds: z.array(z.number().int().positive()).min(1).max(100),
+  // `messages.id` est un UUID : le schéma n'acceptait que des entiers, donc
+  // tout appel légitime était rejeté en 400.
+  messageIds: z.array(z.string().uuid()).min(1).max(100),
 });
 
 export async function POST(request: Request) {
-  const rateLimitResult = await checkRateLimit('msg-read', 30, 60000);
+  const rateLimitResult = await checkRateLimit(`msg-read:${getClientIp(request)}`, 30, 60000);
   if (!rateLimitResult.allowed) {
     return NextResponse.json({ error: 'Trop de requêtes' }, { status: 429 });
   }

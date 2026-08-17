@@ -16,7 +16,12 @@ export function useInfiniteScroll<T>({ fetchFn, pageSize = 20, threshold = 200 }
   const observerRef = useRef<IntersectionObserver | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const fetchFnRef = useRef(fetchFn);
-  fetchFnRef.current = fetchFn;
+
+  // La ref est synchronisée dans un effet : la muter pendant le rendu est
+  // interdit par React (rendu non pur, incompatible avec le mode concurrent).
+  useEffect(() => {
+    fetchFnRef.current = fetchFn;
+  }, [fetchFn]);
 
   const loadMore = useCallback(async () => {
     if (loading || !hasMore) return;

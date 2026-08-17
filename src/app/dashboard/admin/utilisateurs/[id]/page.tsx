@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Skeleton, SkeletonCard } from '@/components/Skeleton';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter, useParams } from 'next/navigation';
 import Link from '@/components/Link';
@@ -108,7 +109,17 @@ export default function DetailUtilisateur() {
   }, [router, userId]);
 
   if (loading) {
-    return <div className="p-12 text-center text-slate-500 font-medium font-sans">Chargement...</div>;
+    return (
+      <div className="min-h-screen bg-slate-50 p-4 md:p-8">
+        <div className="max-w-7xl mx-auto space-y-4">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-4 w-40" />
+          <div className="space-y-3 pt-4">
+            {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!user) {

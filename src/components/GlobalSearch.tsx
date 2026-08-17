@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { escapeLikePattern } from '@/lib/sanitize';
 import Link from '@/components/Link';
 
 type SearchResult = {
@@ -19,81 +20,95 @@ export default function GlobalSearch({ open, onClose }: { open: boolean; onClose
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (open) {
-      setQuery('');
-      setResults([]);
-      setTimeout(() => inputRef.current?.focus(), 100);
-    }
+    if (!open) return;
+    const timer = setTimeout(() => inputRef.current?.focus(), 100);
+    return () => clearTimeout(timer);
   }, [open]);
 
   useEffect(() => {
-    if (!open || query.length < 2) { setResults([]); return; }
+    if (!open || query.length < 2) return;
+
+    // `cancelled` neutralise une réponse arrivée après la frappe suivante :
+    // le clearTimeout seul n'annule pas une requête déjà partie.
+    let cancelled = false;
 
     const search = async () => {
       setLoading(true);
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { setLoading(false); return; }
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (!session) { setResults([]); return; }
 
-      const items: SearchResult[] = [];
+        const items: SearchResult[] = [];
+        const pattern = escapeLikePattern(query);
 
-      // Search profils
-      const { data: profils } = await supabase
-        .from('profils')
-        .select('id, nom, role')
-        .ilike('nom', `%${query}%`)
-        .neq('id', session.user.id)
-        .limit(5);
+        // Search profils
+        const { data: profils } = await supabase
+          .from('profils_publics')
+          .select('id, nom, role')
+          .ilike('nom', `%${pattern}%`)
+          .neq('id', session.user.id)
+          .limit(5);
 
-      for (const p of profils ?? []) {
-        items.push({
-          type: 'profil',
-          id: p.id,
-          title: p.nom,
-          subtitle: p.role === 'admin' ? 'Administrateur' : p.role === 'entreprise' ? 'Entreprise' : 'Secrétaire',
-          href: '/dashboard/messages',
-        });
-      }
-
-      // Search messages
-      const { data: msgs } = await supabase
-        .from('messages')
-        .select('id, content, sender_id')
-        .ilike('content', `%${query}%`)
-        .or(`sender_id.eq.${session.user.id},receiver_id.eq.${session.user.id}`)
-        .limit(5);
-
-      for (const m of msgs ?? []) {
-        items.push({
-          type: 'message',
-          id: String(m.id),
-          title: m.content.slice(0, 60),
-          subtitle: 'Message',
-          href: '/dashboard/messages',
-        });
-      }
-
-      // Static pages
-      const pages = [
-        { title: 'Tableau de bord', href: '/dashboard', subtitle: 'Page principale' },
-        { title: 'Discussions', href: '/dashboard/messages', subtitle: 'Messagerie' },
-        { title: 'Profil', href: '/profile', subtitle: 'Mon profil' },
-        { title: 'KYC', href: '/dashboard/kyc', subtitle: 'Vérification' },
-        { title: 'Paramètres 2FA', href: '/dashboard/profil/2fa', subtitle: 'Sécurité' },
-      ];
-
-      for (const p of pages) {
-        if (p.title.toLowerCase().includes(query.toLowerCase())) {
-          items.push({ type: 'mission', id: p.href, ...p });
+        for (const p of profils ?? []) {
+          items.push({
+            type: 'profil',
+            id: p.id,
+            title: p.nom,
+            subtitle: p.role === 'admin' ? 'Administrateur' : p.role === 'entreprise' ? 'Entreprise' : 'Secrétaire',
+            href: '/dashboard/messages',
+          });
         }
-      }
 
-      setResults(items);
-      setLoading(false);
+        // Search messages
+        const { data: msgs } = await supabase
+          .from('messages')
+          .select('id, content, sender_id')
+          .ilike('content', `%${pattern}%`)
+          .or(`sender_id.eq.${session.user.id},receiver_id.eq.${session.user.id}`)
+          .limit(5);
+
+        for (const m of msgs ?? []) {
+          items.push({
+            type: 'message',
+            id: String(m.id),
+            title: (m.content ?? '').slice(0, 60),
+            subtitle: 'Message',
+            href: '/dashboard/messages',
+          });
+        }
+
+        // Static pages
+        const pages = [
+          { title: 'Tableau de bord', href: '/dashboard', subtitle: 'Page principale' },
+          { title: 'Discussions', href: '/dashboard/messages', subtitle: 'Messagerie' },
+          { title: 'Profil', href: '/profile', subtitle: 'Mon profil' },
+          { title: 'KYC', href: '/dashboard/kyc', subtitle: 'Vérification' },
+          { title: 'Paramètres 2FA', href: '/dashboard/profil/2fa', subtitle: 'Sécurité' },
+        ];
+
+        for (const p of pages) {
+          if (p.title.toLowerCase().includes(query.toLowerCase())) {
+            items.push({ type: 'mission', id: p.href, ...p });
+          }
+        }
+
+        if (cancelled) return;
+        setResults(items);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     };
 
     const timeout = setTimeout(search, 200);
-    return () => clearTimeout(timeout);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
   }, [query, open]);
+
+  // Résultats dérivés du rendu plutôt que remis à zéro par un effet.
+  const visibleResults = query.length >= 2 ? results : [];
 
   if (!open) return null;
 
@@ -114,9 +129,9 @@ export default function GlobalSearch({ open, onClose }: { open: boolean; onClose
           </div>
         )}
 
-        {results.length > 0 && (
+        {visibleResults.length > 0 && (
           <div className="max-h-80 overflow-y-auto p-2 stagger-children">
-            {results.map(r => (
+            {visibleResults.map(r => (
               <Link key={`${r.type}-${r.id}`} href={r.href} onClick={onClose}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-blue-50 transition-all duration-150 active:scale-[0.98]">
                 <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold shrink-0 ${
@@ -139,7 +154,7 @@ export default function GlobalSearch({ open, onClose }: { open: boolean; onClose
           </div>
         )}
 
-        {query.length >= 2 && results.length === 0 && !loading && (
+        {query.length >= 2 && visibleResults.length === 0 && !loading && (
           <p className="p-6 text-center text-sm text-slate-400 animate-[fadeSlideIn_0.2s_ease-out]">Aucun résultat pour &ldquo;{query}&rdquo;</p>
         )}
       </div>

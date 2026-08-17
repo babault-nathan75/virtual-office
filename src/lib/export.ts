@@ -33,6 +33,9 @@ export function exportToCSV(data: Record<string, unknown>[], filename: string) {
   URL.revokeObjectURL(link.href);
 }
 
+// Le titre du document HTML sert de nom de fichier proposé par le navigateur
+// dans « Enregistrer au format PDF » : c'est là que le paramètre filename
+// s'applique, alors qu'il était jusqu'ici reçu puis ignoré.
 export function exportToPDF(title: string, data: Record<string, unknown>[], filename: string) {
   const printWindow = window.open('', '_blank');
   if (!printWindow) return;
@@ -43,7 +46,7 @@ export function exportToPDF(title: string, data: Record<string, unknown>[], file
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>${escapeHtml(title)}</title>
+  <title>${escapeHtml(filename)}</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 40px; color: #0f172a; }
     h1 { font-size: 24px; margin-bottom: 8px; }

@@ -28,11 +28,58 @@ body {
   font-family: var(--font-geist-sans), system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
 
+/*
+ * iOS zoome automatiquement sur un champ dont la police fait moins de 16 px,
+ * et ne dézoome jamais ensuite. Plusieurs formulaires utilisent `text-sm`
+ * (14 px) : on force 16 px sur les champs, uniquement sur petits écrans.
+ */
+@media (max-width: 767px) {
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Cible tactile minimale recommandée (WCAG 2.5.5) sur les contrôles. */
+@media (pointer: coarse) {
+  button,
+  [role='button'],
+  a[href],
+  label[for],
+  summary {
+    min-height: 44px;
+  }
+
+  /* Les liens en pleine phrase ne doivent pas être étirés. */
+  p a[href],
+  li a[href],
+  span a[href] {
+    min-height: 0;
+  }
+}
+
 /* Focus visible */
 *:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/*
+ * Respect de « réduire les animations » du système : les transitions et
+ * animations décoratives sont neutralisées, sans casser les défilements
+ * programmés (`scroll-behavior` est remis à `auto`).
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Animations */

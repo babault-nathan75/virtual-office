@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { Button, Card, Badge, Avatar, Input, EmptyState } from '@/components/ui';
+import { Button, Card, Badge, Avatar, EmptyState } from '@/components/ui';
 
 const meta: Meta<typeof Button> = {
   title: 'UI/Button',

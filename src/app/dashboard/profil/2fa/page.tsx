@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
@@ -91,7 +92,7 @@ export default function TwoFASetup() {
     const data = await res.json();
 
     if (!res.ok) {
-      setMessage({ text: data.error, type: 'error' });
+      setMessage({ text: data.error || 'Erreur lors de la vérification', type: 'error' });
       setLoading(false);
       return;
     }
@@ -142,11 +143,26 @@ export default function TwoFASetup() {
 
           {enabled ? (
             <div className="text-center py-8">
-              <div className="text-5xl mb-4">🔐</div>
+              {/* SVG en ligne à la place de l'icône CDN flaticon : une page de
+                  sécurité ne devrait pas dépendre d'un hôte tiers. */}
+              <svg className="mx-auto mb-4 h-16 w-16 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                <rect x="4" y="10" width="16" height="11" rx="2" />
+                <path strokeLinecap="round" d="M8 10V7a4 4 0 118 0v3" />
+                <circle cx="12" cy="15.5" r="1.25" fill="currentColor" stroke="none" />
+              </svg>
               <p className="text-green-700 font-bold text-lg">2FA activée</p>
-              <p className="text-slate-500 text-sm mt-2">Votre compte est sécurisé.</p>
+              <p className="text-slate-500 text-sm mt-2 mb-8">Votre compte est sécurisé.</p>
+              <Link href="/dashboard"
+                className="py-3 px-6 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-bold transition"
+              >
+                Tableau de bord
+              </Link>
             </div>
           ) : !method ? (
+            /* Une première branche `method === null` interceptait ce cas et
+               n'affichait que le titre : les deux boutons de configuration
+               ci-dessous étaient donc inatteignables, et la page d'activation
+               de la 2FA se retrouvait sans aucune action possible. */
             <div className="space-y-4">
               <p className="text-sm text-slate-600 font-medium mb-4">Choisissez votre méthode :</p>
 
@@ -182,7 +198,9 @@ export default function TwoFASetup() {
                     Scannez ce QR code avec Google Authenticator :
                   </p>
                   <div className="inline-block p-4 bg-white rounded-2xl border border-slate-200 shadow-sm">
-                    <img src={qrData} alt="QR Code 2FA" width={200} height={200} />
+                    {/* `unoptimized` : le QR code est une data: URL générée en
+                        mémoire, l'optimiseur d'images ne peut pas la traiter. */}
+                    <Image src={qrData} alt="QR Code 2FA" width={200} height={200} unoptimized />
                   </div>
                   <p className="text-xs text-slate-400 mt-3">
                     Secret : <span className="font-mono bg-slate-100 px-2 py-1 rounded">{secret}</span>
@@ -191,9 +209,14 @@ export default function TwoFASetup() {
               )}
 
               {method === 'email' && (
-                <p className="text-sm text-slate-600 text-center">
-                  Un code à 6 chiffres a été envoyé par email.
-                </p>
+                <>
+                  <p className="text-sm text-slate-600 text-center">
+                    Un code à 6 chiffres a été envoyé par email.
+                  </p>
+                  <p className="text-sm text-slate-600 text-center">
+                    Si vous ne le voyez pas, vérifiez vos spams ou cliquez sur &laquo;&nbsp;Changer de méthode&nbsp;&raquo; pour réessayer.
+                  </p>
+                </>
               )}
 
               <div>

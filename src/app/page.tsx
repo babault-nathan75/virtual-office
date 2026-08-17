@@ -95,7 +95,7 @@ export default function Home() {
                     </div>
                     <div>
                       <h4 className="font-extrabold text-slate-900 text-base mb-1 tracking-tight">Publiez votre besoin</h4>
-                      <p className="text-slate-600 text-sm leading-relaxed font-medium">Décrivez précisément vos tâches (saisie, gestion d'appels, mails) et la durée estimée.</p>
+                      <p className="text-slate-600 text-sm leading-relaxed font-medium">Décrivez précisément vos tâches (saisie, gestion d&apos;appels, mails) et la durée estimée.</p>
                     </div>
                   </li>
                   <li className="flex gap-5 group">
@@ -173,7 +173,7 @@ export default function Home() {
               Pourquoi choisir notre plateforme ?
             </h2>
             <p className="text-slate-500 font-medium text-base max-w-md mx-auto">
-              L'excellence administrative sans les contraintes traditionnelles.
+              L&apos;excellence administrative sans les contraintes traditionnelles.
             </p>
           </div>
 

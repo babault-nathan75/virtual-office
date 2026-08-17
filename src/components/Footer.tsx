@@ -1,12 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Link from '@/components/Link';
-import { supabase } from '@/lib/supabaseClient';
+import { usePathname } from 'next/navigation';
+import { useRole, type Role } from '@/lib/roleStore';
 
-type UserRole = 'entreprise' | 'secretaire' | 'admin' | null;
-
-const ROLE_LINKS: Record<string, { label: string; href: string }[]> = {
+const ROLE_LINKS: Record<Role, { label: string; href: string }[]> = {
   entreprise: [
     { label: 'Trouver une secrétaire', href: '/dashboard/entreprise/chercher' },
     { label: 'Publier une mission', href: '/dashboard/entreprise/nouvelle-mission' },
@@ -26,25 +24,18 @@ const ROLE_LINKS: Record<string, { label: string; href: string }[]> = {
 };
 
 export default function Footer() {
-  const [role, setRole] = useState<UserRole>(null);
+  // `useRole` renvoie null au rendu serveur comme au premier rendu client :
+  // le garde-fou `mounted` qui existait ici n'a plus lieu d'être.
+  const role = useRole();
+  const pathname = usePathname();
 
-  useEffect(() => {
-    const getRole = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      const { data } = await supabase.from('profils').select('role').eq('id', session.user.id).maybeSingle();
-      if (data?.role) setRole(data.role as UserRole);
-    };
-    getRole();
-  }, []);
-
-  const links = role ? ROLE_LINKS[role] ?? [] : [];
+  const links = role ? ROLE_LINKS[role] : [];
 
   return (
     <footer className="border-t border-slate-100 bg-white">
       <div className="max-w-6xl mx-auto py-8 px-4">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-2 text-sm text-slate-500 font-medium">
+          <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-center text-sm text-slate-500 font-medium">
             <span className="text-slate-400">&copy; {new Date().getFullYear()} SecrétariatPro</span>
             <span className="text-slate-300">&middot;</span>
             <Link href="/mentions-legales" className="hover:text-blue-700 transition-colors duration-200 underline underline-offset-2 decoration-transparent hover:decoration-blue-700">Mentions légales</Link>
@@ -54,12 +45,24 @@ export default function Footer() {
             <Link href="/confidentialite" className="hover:text-blue-700 transition-colors duration-200 underline underline-offset-2 decoration-transparent hover:decoration-blue-700">Confidentialité</Link>
           </div>
           {links.length > 0 && (
-            <div className="flex items-center gap-4 text-sm">
-              {links.map(link => (
-                <Link key={link.href} href={link.href} className="text-slate-400 hover:text-blue-600 transition-colors duration-200 font-medium hover:underline underline-offset-2">
-                  {link.label}
-                </Link>
-              ))}
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm">
+              {links.map(link => {
+                const isActive = pathname === link.href || pathname.startsWith(link.href + '/');
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`transition-colors duration-200 font-medium underline-offset-2 ${
+                      isActive
+                        ? 'text-blue-600 font-bold underline'
+                        : 'text-slate-400 hover:text-blue-600 hover:underline'
+                    }`}
+                  >
+                    {link.label}
+                  </Link>
+                );
+              })}
             </div>
           )}
         </div>

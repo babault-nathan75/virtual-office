@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import * as OTPAuth from 'otpauth';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { z } from 'zod';
-import { checkRateLimit } from '@/lib/rateLimit';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -16,7 +16,7 @@ const validateSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const rateLimitResult = await checkRateLimit('2fa-validate', 5, 60000);
+  const rateLimitResult = await checkRateLimit(`2fa-validate:${getClientIp(request)}`, 5, 60000);
   if (!rateLimitResult.allowed) {
     return NextResponse.json({ error: 'Trop de requêtes. Réessayez plus tard.' }, { status: 429 });
   }

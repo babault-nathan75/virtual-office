@@ -65,8 +65,11 @@ function generateDigestHTML(userName: string, stats: { messages: number; unread:
 
 export async function POST(request: Request) {
   try {
+    // Sans le test explicite sur cronSecret, un CRON_SECRET absent rend
+    // l'en-tête « Bearer undefined » valide et ouvre la route à tous.
     const authHeader = request.headers.get('authorization');
-    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    const cronSecret = process.env.CRON_SECRET;
+    if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -85,17 +88,24 @@ export async function POST(request: Request) {
       const stats = await getWeeklyStats(user.id);
       if (stats.messages === 0) continue;
 
-      await transporter.sendMail({
-        from: `"SecrétariatPro" <${process.env.SMTP_USER}>`,
-        to: user.email,
-        subject: `📊 Votre résumé hebdomadaire — ${stats.messages} messages`,
-        html: generateDigestHTML(user.nom, stats),
-      });
-      sent++;
+      // Un envoi en échec (adresse invalide, quota SMTP…) ne doit pas
+      // interrompre le digest des autres utilisateurs.
+      try {
+        await transporter.sendMail({
+          from: `"SecrétariatPro" <${process.env.SMTP_USER}>`,
+          to: user.email,
+          subject: `📊 Votre résumé hebdomadaire — ${stats.messages} messages`,
+          html: generateDigestHTML(user.nom || 'Utilisateur', stats),
+        });
+        sent++;
+      } catch (mailError) {
+        console.error('[digest] Envoi échoué pour un destinataire :', mailError);
+      }
     }
 
     return NextResponse.json({ sent });
   } catch (error) {
+    console.error('[digest] Erreur:', error);
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
   }
 }

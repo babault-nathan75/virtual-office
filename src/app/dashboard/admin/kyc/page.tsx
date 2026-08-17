@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useEscapeKey } from '@/hooks/useEscapeKey';
+import { Skeleton, SkeletonCard } from '@/components/Skeleton';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
@@ -8,11 +10,11 @@ import { toast } from '@/components/Toast';
 import { getKycSignedUrl, KYC_BUCKETS } from '@/lib/kycStorage';
 
 type KycEntry = {
-  id: number;
+  id: string;
   user_id: string;
   statut: string;
   prenom: string;
-  nom_naissance: string;
+  nom: string | null;
   date_naissance: string;
   nationalite: string | null;
   type_compte: string;
@@ -22,21 +24,39 @@ type KycEntry = {
   nom_entreprise: string | null;
   created_at: string;
   updated_at: string | null;
+  derniere_soumission_at: string | null;
   motif_rejet: string | null;
   user_nom: string;
   user_email: string;
 };
+
+/**
+ * Date de la dernière soumission par l'utilisateur.
+ * Repli sur `created_at` pour les dossiers antérieurs à la migration 008.
+ */
+function dateSoumission(kyc: Pick<KycEntry, 'derniere_soumission_at' | 'created_at'>) {
+  return kyc.derniere_soumission_at ?? kyc.created_at;
+}
+
+/** Un dossier resoumis a une date de soumission postérieure à sa création. */
+function estResoumis(kyc: Pick<KycEntry, 'derniere_soumission_at' | 'created_at'>) {
+  if (!kyc.derniere_soumission_at) return false;
+  return new Date(kyc.derniere_soumission_at).getTime() - new Date(kyc.created_at).getTime() > 60_000;
+}
 
 export default function AdminKycPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [kycList, setKycList] = useState<KycEntry[]>([]);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
-  const [acting, setActing] = useState<number | null>(null);
+  const [acting, setActing] = useState<string | null>(null);
   const [selectedKyc, setSelectedKyc] = useState<KycEntry | null>(null);
   const [signedUrls, setSignedUrls] = useState<{ piece: string; selfie: string; doc: string | null } | null>(null);
-  const [rejectModal, setRejectModal] = useState<number | null>(null);
+  const [rejectModal, setRejectModal] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+
+  useEscapeKey(selectedKyc !== null, () => { setSelectedKyc(null); setSignedUrls(null); });
+  useEscapeKey(rejectModal !== null, () => { setRejectModal(null); setRejectReason(''); });
 
   const openDetails = async (kyc: KycEntry) => {
     setSelectedKyc(kyc);
@@ -53,10 +73,16 @@ export default function AdminKycPage() {
     const { data: kycs } = await supabase
       .from('kyc_verifications')
       .select('*')
-      .eq('type_compte', 'secretaire')
-      .order('created_at', { ascending: false });
+      .eq('type_compte', 'secretaire');
 
     if (!kycs) return;
+
+    // Tri effectué côté client sur la date de dernière soumission : un dossier
+    // corrigé après refus doit remonter en tête de file, alors qu'un tri SQL
+    // sur `created_at` le laissait au fond.
+    kycs.sort(
+      (a, b) => new Date(dateSoumission(b)).getTime() - new Date(dateSoumission(a)).getTime()
+    );
 
     // Récupérer les infos des utilisateurs
     const userIds = kycs.map(k => k.user_id);
@@ -91,8 +117,10 @@ export default function AdminKycPage() {
     fetchData();
   }, [router]);
 
-  const handleApprove = async (kycId: number) => {
+  const handleApprove = async (kycId: string) => {
     setActing(kycId);
+    const kyc = kycList.find(k => k.id === kycId);
+
     const { error } = await supabase
       .from('kyc_verifications')
       .update({ statut: 'approved', updated_at: new Date().toISOString() })
@@ -103,17 +131,27 @@ export default function AdminKycPage() {
     } else {
       toast.success('KYC approuvé !');
       setKycList(prev => prev.map(k => k.id === kycId ? { ...k, statut: 'approved', updated_at: new Date().toISOString() } : k));
+
+      // Notify user (email + in-app)
+      if (kyc) {
+        fetch('/api/kyc/notify-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: kyc.user_id, statut: 'approved' }),
+        }).catch(() => {});
+      }
     }
     setActing(null);
   };
 
   const handleReject = async () => {
-    if (!rejectModal) return;
+    if (rejectModal === null) return;
     if (!rejectReason.trim()) {
       toast.error('Veuillez saisir un motif de rejet.');
       return;
     }
     setActing(rejectModal);
+    const kyc = kycList.find(k => k.id === rejectModal);
 
     const { error } = await supabase
       .from('kyc_verifications')
@@ -129,6 +167,15 @@ export default function AdminKycPage() {
     } else {
       toast.success('KYC refusé.');
       setKycList(prev => prev.map(k => k.id === rejectModal ? { ...k, statut: 'rejected', motif_rejet: rejectReason.trim() || null } : k));
+
+      // Notify user (email + in-app)
+      if (kyc) {
+        fetch('/api/kyc/notify-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: kyc.user_id, statut: 'rejected', motif: rejectReason.trim() }),
+        }).catch(() => {});
+      }
     }
     setRejectModal(null);
     setRejectReason('');
@@ -138,7 +185,17 @@ export default function AdminKycPage() {
   const filtered = kycList.filter(k => filter === 'all' || k.statut === filter);
 
   if (loading) {
-    return <div className="p-12 text-center text-slate-500 font-medium">Chargement...</div>;
+    return (
+      <div className="min-h-screen bg-slate-50 p-4 md:p-8">
+        <div className="max-w-7xl mx-auto space-y-4">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-4 w-40" />
+          <div className="space-y-3 pt-4">
+            {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -188,10 +245,20 @@ export default function AdminKycPage() {
                       {kyc.prenom.charAt(0).toUpperCase()}
                     </div>
                     <div>
-                      <h3 className="font-black text-slate-900 tracking-tight">{kyc.prenom} {kyc.nom_naissance}</h3>
+                      <h3 className="font-black text-slate-900 tracking-tight">{kyc.prenom} {kyc.nom}</h3>
                       <p className="text-xs text-slate-500 font-medium">{kyc.user_email}</p>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        👩‍💻 Secrétaire · Soumis le {new Date(kyc.created_at).toLocaleDateString('fr-FR')}
+                        👩‍💻 Secrétaire ·{' '}
+                        {estResoumis(kyc) ? (
+                          <>
+                            <span className="font-bold text-blue-600">
+                              Resoumis le {new Date(dateSoumission(kyc)).toLocaleDateString('fr-FR')}
+                            </span>
+                            {' '}(dossier initial du {new Date(kyc.created_at).toLocaleDateString('fr-FR')})
+                          </>
+                        ) : (
+                          <>Soumis le {new Date(dateSoumission(kyc)).toLocaleDateString('fr-FR')}</>
+                        )}
                       </p>
                     </div>
                   </div>
@@ -237,23 +304,23 @@ export default function AdminKycPage() {
 
       {/* Modale détails */}
       {selectedKyc && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[100]" onClick={() => { setSelectedKyc(null); setSignedUrls(null); }}>
+        <div role="dialog" aria-modal="true" aria-label="Dossier KYC" className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[100]" onClick={() => { setSelectedKyc(null); setSignedUrls(null); }}>
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50 sticky top-0">
               <h3 className="text-lg font-black tracking-tight text-slate-900">
-                Dossier KYC — {selectedKyc.prenom} {selectedKyc.nom_naissance}
+                Dossier KYC — {selectedKyc.prenom} {selectedKyc.nom}
               </h3>
               <button onClick={() => { setSelectedKyc(null); setSignedUrls(null); }} className="text-slate-400 hover:text-slate-900 text-2xl font-light">&times;</button>
             </div>
             <div className="p-6 space-y-6">
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-slate-50 p-3 rounded-xl">
-                  <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-0.5">Prénom</p>
+                  <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-0.5">Prénoms</p>
                   <p className="text-sm font-bold text-slate-800">{selectedKyc.prenom}</p>
                 </div>
                 <div className="bg-slate-50 p-3 rounded-xl">
-                  <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-0.5">Nom de naissance</p>
-                  <p className="text-sm font-bold text-slate-800">{selectedKyc.nom_naissance}</p>
+                  <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-0.5">Nom</p>
+                  <p className="text-sm font-bold text-slate-800">{selectedKyc.nom || '—'}</p>
                 </div>
                 <div className="bg-slate-50 p-3 rounded-xl">
                   <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-0.5">Date de naissance</p>
@@ -339,7 +406,7 @@ export default function AdminKycPage() {
 
       {/* Modale refus */}
       {rejectModal !== null && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[101]" onClick={() => setRejectModal(null)}>
+        <div role="dialog" aria-modal="true" aria-label="Motif du refus" className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[101]" onClick={() => setRejectModal(null)}>
           <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
             <h3 className="font-black text-slate-900 mb-1">Raison du refus</h3>
             <p className="text-xs text-slate-500 mb-3">Ce motif sera transmis à l&apos;utilisateur pour qu&apos;il puisse corriger son dossier.</p>

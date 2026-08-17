@@ -14,8 +14,9 @@ async function getUser() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     { cookies: { getAll() { return cookieStore.getAll(); } } }
   );
-  const { data: { session } } = await supabase.auth.getSession();
-  return { user: session?.user, supabase };
+  // getUser() valide le JWT côté serveur, contrairement à getSession().
+  const { data: { user } } = await supabase.auth.getUser();
+  return { user, supabase };
 }
 
 export default async function DashboardSecretairePage() {
@@ -36,9 +37,9 @@ export default async function DashboardSecretairePage() {
       completion={completion}
       kycApproved={data.kycApproved}
       twoFactorEnabled={data.twoFactorEnabled}
-      missions={data.missions as any}
-      candidatures={data.candidatures as any}
-      offres={data.offres as any}
+      missions={data.missions}
+      candidatures={data.candidatures}
+      offres={data.offres}
     />
   );
 }

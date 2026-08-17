@@ -1,7 +1,9 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import { escapeLikePattern } from '@/lib/sanitize';
 import Link from '@/components/Link';
 
 type SearchResult = {
@@ -24,6 +26,7 @@ const PAGES = [
 ];
 
 export default function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const router = useRouter();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -31,67 +34,94 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (open) {
-      setQuery('');
-      setResults([]);
-      setSelectedIdx(0);
-      setTimeout(() => inputRef.current?.focus(), 100);
-    }
+    if (!open) return;
+    const timer = setTimeout(() => inputRef.current?.focus(), 100);
+    return () => clearTimeout(timer);
   }, [open]);
 
   useEffect(() => {
-    if (!open || query.length < 2) { setResults([]); setSelectedIdx(0); return; }
+    if (!open || query.length < 2) return;
+
+    // `cancelled` neutralise une réponse arrivée après la frappe suivante :
+    // le clearTimeout seul n'annule pas une requête déjà partie.
+    let cancelled = false;
 
     const search = async () => {
       setLoading(true);
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { setLoading(false); return; }
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (!session) { setResults([]); return; }
 
-      const items: SearchResult[] = [];
+        const items: SearchResult[] = [];
 
-      const { data: users } = await supabase
-        .from('profils')
-        .select('id, nom, role')
-        .ilike('nom', `%${query}%`)
-        .neq('id', session.user.id)
-        .limit(5);
+        const { data: users } = await supabase
+          .from('profils_publics')
+          .select('id, nom, role')
+          .ilike('nom', `%${escapeLikePattern(query)}%`)
+          .neq('id', session.user.id)
+          .limit(5);
 
-      for (const u of users ?? []) {
-        items.push({
-          type: 'conversation',
-          id: u.id,
-          title: u.nom,
-          subtitle: u.role === 'admin' ? 'Administrateur' : u.role === 'entreprise' ? 'Entreprise' : 'Secrétaire',
-          href: u.role === 'admin' ? '/dashboard/admin/messages' : '/dashboard/messages',
-        });
-      }
-
-      for (const p of PAGES) {
-        if (p.title.toLowerCase().includes(query.toLowerCase()) || p.subtitle.toLowerCase().includes(query.toLowerCase())) {
-          items.push({ type: 'page', id: p.href, ...p });
+        for (const u of users ?? []) {
+          items.push({
+            type: 'conversation',
+            id: u.id,
+            title: u.nom,
+            subtitle: u.role === 'admin' ? 'Administrateur' : u.role === 'entreprise' ? 'Entreprise' : 'Secrétaire',
+            href: u.role === 'admin' ? '/dashboard/admin/messages' : '/dashboard/messages',
+          });
         }
-      }
 
-      setResults(items);
-      setSelectedIdx(0);
-      setLoading(false);
+        for (const p of PAGES) {
+          if (p.title.toLowerCase().includes(query.toLowerCase()) || p.subtitle.toLowerCase().includes(query.toLowerCase())) {
+            items.push({ type: 'page', id: p.href, ...p });
+          }
+        }
+
+        if (cancelled) return;
+        setResults(items);
+        setSelectedIdx(0);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     };
 
     const timeout = setTimeout(search, 200);
-    return () => clearTimeout(timeout);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
   }, [query, open]);
+
+  // Résultats dérivés du rendu : sous 2 caractères la liste est masquée sans
+  // qu'un effet ait à remettre l'état à zéro. `useMemo` évite de recréer un
+  // tableau à chaque rendu, ce qui ferait réabonner l'écouteur clavier
+  // ci-dessous en boucle.
+  const visibleResults = useMemo(
+    () => (query.length >= 2 ? results : []),
+    [query, results]
+  );
 
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { onClose(); return; }
-      if (e.key === 'ArrowDown') { e.preventDefault(); setSelectedIdx(prev => Math.min(prev + 1, results.length - 1)); }
+      if (e.key === 'ArrowDown') { e.preventDefault(); setSelectedIdx(prev => Math.min(prev + 1, visibleResults.length - 1)); }
       if (e.key === 'ArrowUp') { e.preventDefault(); setSelectedIdx(prev => Math.max(prev - 1, 0)); }
-      if (e.key === 'Enter' && results[selectedIdx]) { onClose(); }
+      // Entrée navigue vers l'élément sélectionné : auparavant la palette se
+      // contentait de se fermer, rendant la sélection au clavier inopérante.
+      if (e.key === 'Enter') {
+        const selected = visibleResults[selectedIdx];
+        if (selected) {
+          e.preventDefault();
+          onClose();
+          router.push(selected.href);
+        }
+      }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose, results, selectedIdx]);
+  }, [open, onClose, visibleResults, selectedIdx, router]);
 
   if (!open) return null;
 
@@ -106,9 +136,9 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
           {loading && <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />}
           <kbd className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded shrink-0">ESC</kbd>
         </div>
-        {results.length > 0 && (
+        {visibleResults.length > 0 && (
           <div className="max-h-64 overflow-y-auto p-2">
-            {results.map((r, i) => (
+            {visibleResults.map((r, i) => (
               <Link key={r.id + r.href} href={r.href} onClick={onClose}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition ${i === selectedIdx ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${r.type === 'conversation' ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
@@ -127,7 +157,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
             ))}
           </div>
         )}
-        {query.length >= 2 && results.length === 0 && !loading && (
+        {query.length >= 2 && visibleResults.length === 0 && !loading && (
           <div className="p-8 text-center">
             <div className="w-12 h-12 mx-auto rounded-xl bg-slate-50 flex items-center justify-center mb-3">
               <svg className="w-6 h-6 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>

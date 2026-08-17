@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 
 type Color = 'blue' | 'emerald';
 

@@ -3,10 +3,14 @@
 import { useEffect, useState } from 'react';
 import Link from '@/components/Link';
 import { supabase } from '@/lib/supabaseClient';
+import { getCachedRole, setCachedRole } from '@/lib/roleStore';
 
 type Role = 'entreprise' | 'secretaire' | 'admin' | null;
 
 export default function HeroCTA() {
+  // Pas d'initialisation depuis localStorage : le serveur rend toujours null,
+  // lire le cache au premier rendu client provoquerait une désynchronisation
+  // d'hydratation.
   const [role, setRole] = useState<Role>(null);
   const [ready, setReady] = useState(false);
 
@@ -21,13 +25,25 @@ export default function HeroCTA() {
         }
         return;
       }
+      const cached = getCachedRole(uid);
+      if (cached) {
+        if (mounted) {
+          setRole(cached);
+          setReady(true);
+        }
+        return;
+      }
+      // maybeSingle : `single()` renvoie une erreur si le profil n'existe pas
+      // encore (inscription en cours), ce qui n'est pas un cas exceptionnel.
       const { data } = await supabase
         .from('profils')
         .select('role')
         .eq('id', uid)
-        .single();
+        .maybeSingle();
       if (mounted) {
-        setRole((data?.role as Role) ?? null);
+        const next = (data?.role as Role) ?? null;
+        if (next) setCachedRole(next, uid);
+        setRole(next);
         setReady(true);
       }
     };

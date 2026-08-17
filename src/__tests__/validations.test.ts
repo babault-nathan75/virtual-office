@@ -82,12 +82,12 @@ describe('connexionSchema', () => {
 
 describe('kycSchema', () => {
   it('rejects empty prenom', () => {
-    const result = kycSchema.safeParse({ prenom: '', nom_naissance: 'Dupont', date_naissance: '2000-01-01' });
+    const result = kycSchema.safeParse({ prenom: '', nom: 'Dupont', date_naissance: '2000-01-01' });
     expect(result.success).toBe(false);
   });
 
   it('accepts valid data', () => {
-    const result = kycSchema.safeParse({ prenom: 'Marie', nom_naissance: 'Dupont', date_naissance: '2000-01-01' });
+    const result = kycSchema.safeParse({ prenom: 'Marie', nom: 'Dupont', date_naissance: '2000-01-01' });
     expect(result.success).toBe(true);
   });
 });

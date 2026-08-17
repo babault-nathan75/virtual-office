@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useEscapeKey } from '@/hooks/useEscapeKey';
+import { Skeleton, SkeletonCard } from '@/components/Skeleton';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from '@/components/Toast';
 
@@ -23,7 +25,8 @@ type Avis = {
 
 export default function RatingPage() {
   const [userId, setUserId] = useState('');
-  const [role, setRole] = useState<'entreprise' | 'secretaire'>('entreprise');
+  // Le rôle était chargé puis jamais lu : la requête associée a été retirée
+  // avec l'état (la page affiche le même contenu pour les deux rôles).
   const [missions, setMissions] = useState<Mission[]>([]);
   const [existingAvis, setExistingAvis] = useState<Avis[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,9 +46,6 @@ export default function RatingPage() {
       const userId = session.user.id;
       setUserId(userId);
 
-      const { data: profil } = await supabase.from('profils').select('role').eq('id', userId).maybeSingle();
-      if (profil) setRole(profil.role as 'entreprise' | 'secretaire');
-
       // Fetch concluded missions where the user is involved
       const { data: offres } = await supabase
         .from('offres')
@@ -53,28 +53,39 @@ export default function RatingPage() {
         .eq('statut', 'concluee')
         .or(`entreprise_id.eq.${userId},secretaire_id.eq.${userId}`);
 
+      // La relation imbriquée est renvoyée soit comme objet, soit comme
+      // tableau selon l'inférence PostgREST : les deux formes sont traitées.
       const missionsData: Mission[] = [];
-      if (offres) {
-        for (const o of offres) {
-          const m = (o as any).mission_id;
-          if (m && m.statut === 'concluee') {
-            missionsData.push(m);
-          }
+      for (const o of offres ?? []) {
+        const relation = (o as { mission_id: Mission | Mission[] | null }).mission_id;
+        const mission = Array.isArray(relation) ? relation[0] : relation;
+        if (mission && mission.statut === 'concluee') {
+          missionsData.push(mission);
         }
       }
       setMissions(missionsData);
 
       // Fetch existing reviews
-      const { data: avisData } = await supabase
+      // L'erreur était ignorée : la table `avis` n'existant pas, la page
+      // affichait « aucun avis » au lieu de signaler le problème.
+      const { data: avisData, error: avisError } = await supabase
         .from('avis')
         .select('*')
-        .or(`reviewer_id.eq.${userId}`);
-      if (avisData) setExistingAvis(avisData);
+        .eq('reviewer_id', userId);
+
+      if (avisError) {
+        console.error('[avis] Lecture échouée :', avisError);
+        toast.error('Impossible de charger vos avis.');
+      } else if (avisData) {
+        setExistingAvis(avisData);
+      }
 
       setLoading(false);
     };
     fetchData();
   }, []);
+
+  useEscapeKey(selectedMission !== null, () => setSelectedMission(null));
 
   const hasReviewed = (missionId: number) =>
     existingAvis.some(a => a.mission_id === missionId && a.reviewer_id === userId);
@@ -114,7 +125,17 @@ export default function RatingPage() {
   };
 
   if (loading) {
-    return <div className="p-12 text-center text-slate-500 font-medium">Chargement...</div>;
+    return (
+      <div className="min-h-screen bg-slate-50 p-4 md:p-8">
+        <div className="max-w-7xl mx-auto space-y-4">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-4 w-40" />
+          <div className="space-y-3 pt-4">
+            {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -163,7 +184,7 @@ export default function RatingPage() {
 
       {/* Rating Modal */}
       {selectedMission && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[100]" onClick={() => setSelectedMission(null)}>
+        <div role="dialog" aria-modal="true" aria-label="Noter la collaboration" className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[100]" onClick={() => setSelectedMission(null)}>
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="bg-blue-50 p-6 border-b border-blue-100">
               <h3 className="text-xl font-black tracking-tight text-slate-900">

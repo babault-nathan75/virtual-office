@@ -287,7 +287,7 @@ export default function ChercherSecretaire() {
 
       // Profils des secrétaires (nom seulement — surtout pas email/tel)
       const { data: profils } = await supabase
-        .from('profils')
+        .from('profils_publics')
         .select('id, nom')
         .eq('role', 'secretaire')
         .in('id', visibleIds.length > 0 ? visibleIds : ['__none__']);
@@ -736,7 +736,7 @@ function ProfileModal({ s, onClose }: { s: Secretaire; onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label="Profil de la secrétaire" className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={onClose}>
       <div
         className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden"
         onClick={e => e.stopPropagation()}

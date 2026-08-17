@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import * as OTPAuth from 'otpauth';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { z } from 'zod';
-import { checkRateLimit } from '@/lib/rateLimit';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -16,7 +16,7 @@ const verifySchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const rateLimitResult = await checkRateLimit('2fa-verify', 5, 60000);
+  const rateLimitResult = await checkRateLimit(`2fa-verify:${getClientIp(request)}`, 5, 60000);
   if (!rateLimitResult.allowed) {
     return NextResponse.json({ error: 'Trop de requêtes. Réessayez plus tard.' }, { status: 429 });
   }
@@ -41,11 +41,11 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (error || !tfa) {
-    return NextResponse.json({ error: '2FA not set up' }, { status: 400 });
+    return NextResponse.json({ error: 'La 2FA n\'a pas été initialisée. Veuillez d\'abord activer la 2FA.' }, { status: 400 });
   }
 
   if (tfa.enabled) {
-    return NextResponse.json({ error: '2FA already enabled' }, { status: 400 });
+    return NextResponse.json({ error: 'La 2FA est déjà activée sur votre compte.' }, { status: 400 });
   }
 
   let isValid = false;

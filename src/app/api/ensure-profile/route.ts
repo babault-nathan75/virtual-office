@@ -12,29 +12,45 @@ const supabaseAdmin = createClient(
 const ensureProfileSchema = z.object({
   userId: z.string().uuid(),
   nom: z.string().min(1).max(200).optional(),
-  role: z.enum(['entreprise', 'secretaire', 'admin']),
+  // 'admin' est volontairement exclu : un rôle privilégié ne peut jamais
+  // être auto-attribué depuis le client.
+  role: z.enum(['entreprise', 'secretaire']),
   emailConfirmed: z.boolean().optional(),
-  email: z.string().email().optional(),
+  telephone: z.string().max(30).optional(),
 });
 
 export async function POST(request: Request) {
-  const rateLimitResult = await checkRateLimit('ensure-profile', 5, 60000);
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
+  }
+
+  const rateLimitResult = await checkRateLimit(`ensure-profile:${user.id}`, 5, 60000);
   if (!rateLimitResult.allowed) {
     return NextResponse.json({ error: 'Trop de requêtes.' }, { status: 429 });
   }
 
-  const body = await request.json();
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Corps JSON invalide' }, { status: 400 });
+  }
+
   const parsed = ensureProfileSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: 'Données invalides' }, { status: 400 });
   }
 
-  const { userId, nom, role, emailConfirmed, email } = parsed.data;
+  const { userId, nom, role, emailConfirmed, telephone } = parsed.data;
 
-  const user = await getAuthenticatedUser();
-  if (!user || user.id !== userId) {
+  if (user.id !== userId) {
     return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
   }
+
+  // L'email provient toujours de la session vérifiée, jamais du client :
+  // sinon n'importe qui pourrait revendiquer le profil d'un tiers.
+  const email = user.email;
 
   const { data: existing } = await supabaseAdmin
     .from('profils')
@@ -54,16 +70,19 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (existingByEmail && existingByEmail.id !== userId) {
+      // Profil orphelin créé avant que l'utilisateur ne dispose de cet id auth :
+      // on le rattache sans jamais toucher au rôle déjà enregistré.
       await supabaseAdmin
         .from('profils')
-        .update({ id: userId, role, nom: nom || 'Utilisateur' })
+        .update({ id: userId, nom: nom || 'Utilisateur' })
         .eq('id', existingByEmail.id);
-      return NextResponse.json({ role });
+      return NextResponse.json({ role: existingByEmail.role || role });
     }
   }
 
   const insertData: Record<string, unknown> = { id: userId, role, nom: nom || 'Utilisateur' };
   if (email) insertData.email = email;
+  if (telephone) insertData.telephone = telephone;
   if (emailConfirmed === false) {
     insertData.email_confirmed = false;
   }

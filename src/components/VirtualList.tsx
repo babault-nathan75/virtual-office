@@ -14,6 +14,10 @@ type Props<T> = {
 export default function VirtualList<T>({ items, height, estimateSize = 60, renderItem, className = '' }: Props<T>) {
   const parentRef = useRef<HTMLDivElement>(null);
 
+  /* Même situation que pour react-hook-form : `useVirtualizer` renvoie des
+     fonctions que le compilateur React ne peut pas mémoïser sans risque
+     d'affichage périmé. Rien à corriger côté code applicatif. */
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => parentRef.current,

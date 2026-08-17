@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { checkRateLimit } from '@/lib/rateLimit';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 import { z } from 'zod';
 
 const supabaseAdmin = createClient(
@@ -20,7 +20,7 @@ function escapeLike(str: string): string {
 }
 
 export async function GET(request: Request) {
-  const rateLimitResult = await checkRateLimit('msg-search', 20, 60000);
+  const rateLimitResult = await checkRateLimit(`msg-search:${getClientIp(request)}`, 20, 60000);
   if (!rateLimitResult.allowed) {
     return NextResponse.json({ error: 'Trop de requêtes' }, { status: 429 });
   }

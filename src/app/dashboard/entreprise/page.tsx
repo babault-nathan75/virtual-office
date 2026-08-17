@@ -14,8 +14,9 @@ async function getUser() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     { cookies: { getAll() { return cookieStore.getAll(); } } }
   );
-  const { data: { session } } = await supabase.auth.getSession();
-  return { user: session?.user, supabase };
+  // getUser() valide le JWT côté serveur, contrairement à getSession().
+  const { data: { user } } = await supabase.auth.getUser();
+  return { user, supabase };
 }
 
 export default async function DashboardEntreprisePage() {
@@ -29,7 +30,7 @@ export default async function DashboardEntreprisePage() {
 
   return (
     <EntrepriseDashboardClient
-      initialData={data as any}
+      initialData={data}
       userId={user.id}
       userName={data.profil?.nom || 'Entreprise'}
     />

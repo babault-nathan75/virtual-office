@@ -30,6 +30,13 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# journaux du serveur de développement (générés, à ne pas versionner)
+dev.log
+dev-err.log
+dev-log.txt
+dev-error.txt
+dev-output.txt
+
 # env files (can opt-in for committing if needed)
 .env*
 

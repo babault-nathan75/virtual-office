@@ -53,7 +53,7 @@ export default function StatsCharts() {
 
       // Top entreprises par nombre d'offres
       const entIds = Array.from(new Set(offres.map(o => o.entreprise_id)));
-      const { data: profs } = await supabase.from('profils').select('id, nom').in('id', entIds);
+      const { data: profs } = await supabase.from('profils_publics').select('id, nom').in('id', entIds);
       const nomMap = new Map((profs ?? []).map(p => [p.id, p.nom]));
 
       const byEnt: Record<string, number> = {};

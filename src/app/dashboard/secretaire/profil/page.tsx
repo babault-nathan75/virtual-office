@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
-import { Button, Card, Breadcrumbs } from '@/components/ui';
+import { Button, Breadcrumbs } from '@/components/ui';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 // ============================================================

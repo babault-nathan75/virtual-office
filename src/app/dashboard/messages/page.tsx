@@ -25,12 +25,11 @@ type Profile = {
   id: string;
   nom: string;
   role: UserRole;
-  email?: string | null;
-  telephone?: string | null;
 };
 
 type Message = {
-  id: number;
+  // UUID côté base, et non un entier.
+  id: string;
   sender_id: string;
   receiver_id: string;
   content: string;
@@ -50,8 +49,10 @@ type PresenceInfo = {
 const MESSAGE_SELECT =
   'id, sender_id, receiver_id, content, read, read_at, closed, closed_by, closed_at, created_at';
 
-const PROFILE_SELECT =
-  'id, nom, role, email, telephone';
+// Les coordonnées (email, téléphone) ne sont plus exposées entre
+// utilisateurs : elles restent réservées à leur propriétaire et aux
+// administrateurs (migration 007).
+const PROFILE_SELECT = 'id, nom, role';
 
 function isUserRole(value: unknown): value is UserRole {
   return value === 'entreprise' || value === 'secretaire' || value === 'admin';
@@ -195,12 +196,7 @@ export default function MessagesPage() {
     if (!query) return contacts;
 
     return contacts.filter((contact) => {
-      const searchable = [
-        contact.nom,
-        getRoleLabel(contact.role),
-        contact.email ?? '',
-        contact.telephone ?? '',
-      ]
+      const searchable = [contact.nom, getRoleLabel(contact.role)]
         .join(' ')
         .toLocaleLowerCase('fr-FR');
 
@@ -212,7 +208,7 @@ export default function MessagesPage() {
     ? getPresenceInfo(undefined, now)
     : null;
 
-  const dashboardHref = currentRole === 'admin' ? '/admin' : '/dashboard';
+  const dashboardHref = currentRole === 'admin' ? '/dashboard/admin' : '/dashboard';
 
   // Session + profil courant.
   useEffect(() => {
@@ -285,7 +281,7 @@ export default function MessagesPage() {
       try {
         if (currentRole === 'admin') {
           const { data, error } = await supabase
-            .from('profils')
+            .from('profils_publics')
             .select(PROFILE_SELECT)
             .neq('id', currentUserId)
             .in('role', ['entreprise', 'secretaire'])
@@ -305,7 +301,7 @@ export default function MessagesPage() {
           });
         } else {
           const { data, error } = await supabase
-            .from('profils')
+            .from('profils_publics')
             .select(PROFILE_SELECT)
             .eq('role', 'admin')
             .order('nom', { ascending: true });
@@ -742,7 +738,7 @@ export default function MessagesPage() {
                         Aucun résultat
                       </p>
                       <p className="mt-1 text-xs leading-5 text-slate-400">
-                        Essayez un nom, un rôle, un email ou un numéro.
+                        Essayez un nom ou un rôle.
                       </p>
                     </div>
                   </div>
@@ -1078,12 +1074,8 @@ export default function MessagesPage() {
 
                         <div className="mt-5 space-y-3">
                           <ProfileField
-                            label="Email"
-                            value={activeContact.email || 'Non renseigné'}
-                          />
-                          <ProfileField
-                            label="Téléphone"
-                            value={activeContact.telephone || 'Non renseigné'}
+                            label="Coordonnées"
+                            value="Échanges via la messagerie"
                           />
                           <ProfileField
                             label="Dernière activité"

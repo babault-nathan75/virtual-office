@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { checkRateLimit } from '@/lib/rateLimit';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL ?? '',
@@ -13,7 +13,7 @@ const checkEmailSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const rateLimitResult = await checkRateLimit('check-email', 5, 60000);
+  const rateLimitResult = await checkRateLimit(`check-email:${getClientIp(req)}`, 5, 60000);
   if (!rateLimitResult.allowed) {
     return NextResponse.json({ error: 'Trop de requêtes.' }, { status: 429 });
   }

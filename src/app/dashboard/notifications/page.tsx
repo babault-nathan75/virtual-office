@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from '@/components/Toast';
 import { Button, Card, Breadcrumbs } from '@/components/ui';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { getPushState, registerPush, unregisterPush } from '@/lib/pushClient';
 
 type Preferences = {
   messages: boolean;
@@ -62,42 +63,116 @@ export default function NotificationPreferencesPage() {
   const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [userId, setUserId] = useState('');
+  const [pushState, setPushState] = useState<Awaited<ReturnType<typeof getPushState>> | null>(null);
+  const [pushBusy, setPushBusy] = useState(false);
 
   useEffect(() => {
     const load = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { router.replace('/connexion'); return; }
+      if (!session) {
+        setLoading(false);
+        router.replace('/connexion');
+        return;
+      }
 
-      const { data } = await supabase
-        .from('profils')
-        .select('notification_prefs')
-        .eq('id', session.user.id)
-        .maybeSingle();
+      setUserId(session.user.id);
+      setPushState(await getPushState());
 
-      if (data?.notification_prefs && typeof data.notification_prefs === 'object') {
-        setPrefs({ ...DEFAULT_PREFS, ...(data.notification_prefs as Partial<Preferences>) });
+      try {
+        const { data } = await supabase
+          .from('profils')
+          .select('notification_prefs')
+          .eq('id', session.user.id)
+          .maybeSingle();
+
+        if (data?.notification_prefs && typeof data.notification_prefs === 'object') {
+          setPrefs({ ...DEFAULT_PREFS, ...(data.notification_prefs as Partial<Preferences>) });
+        }
+      } catch {
+        // column may not exist yet — use defaults
       }
       setLoading(false);
     };
+
     load();
   }, [router]);
 
   const handleSave = async () => {
     setSaving(true);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        // Sans ce traitement, le bouton restait bloqué sur « Sauvegarde… »
+        // indéfiniment lorsque la session avait expiré.
+        toast.error('Session expirée. Veuillez vous reconnecter.');
+        router.replace('/connexion');
+        return;
+      }
 
-    const { error } = await supabase
-      .from('profils')
-      .update({ notification_prefs: prefs })
-      .eq('id', session.user.id);
+      const { error } = await supabase
+        .from('profils')
+        .update({ notification_prefs: prefs })
+        .eq('id', session.user.id);
 
-    if (error) {
-      toast.error('Erreur : ' + error.message);
-    } else {
-      toast.success('Préférences sauvegardées');
+      if (error) {
+        if (error.message.includes('notification_prefs')) {
+          toast.error('Colonne notification_prefs absente. Exécutez la migration 005.');
+        } else {
+          toast.error('Erreur : ' + error.message);
+        }
+      } else {
+        toast.success('Préférences sauvegardées');
+      }
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
+  };
+
+  // L'abonnement push n'était déclenché nulle part dans l'application : la
+  // route /api/push/subscribe et les clés VAPID existaient sans qu'aucun
+  // navigateur ne puisse s'inscrire. Il est ici explicitement demandé par
+  // l'utilisateur, condition requise par les navigateurs.
+  const handlePushToggle = async () => {
+    setPushBusy(true);
+    try {
+      if (pushState === 'subscribed') {
+        const done = await unregisterPush();
+        if (done) {
+          setPushState('available');
+          toast.success('Notifications push désactivées sur cet appareil.');
+        } else {
+          toast.error('Impossible de se désabonner.');
+        }
+        return;
+      }
+
+      const result = await registerPush(userId);
+      if (result.ok) {
+        setPushState('subscribed');
+        toast.success('Notifications push activées sur cet appareil.');
+        return;
+      }
+
+      const messages: Record<string, string> = {
+        unsupported: "Votre navigateur ne prend pas en charge les notifications push.",
+        'not-configured': "Les notifications push ne sont pas configurées sur ce site.",
+        denied: "Vous avez refusé les notifications. Autorisez-les dans les réglages de votre navigateur.",
+        error: "L'activation a échoué. Réessayez plus tard.",
+      };
+      toast.error(messages[result.reason]);
+      setPushState(await getPushState());
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const PUSH_LABEL: Record<string, string> = {
+    subscribed: 'Activées sur cet appareil',
+    available: 'Désactivées sur cet appareil',
+    denied: 'Bloquées par le navigateur',
+    unsupported: 'Non prises en charge par ce navigateur',
+    'not-configured': 'Non configurées sur ce site',
   };
 
   if (loading) {
@@ -126,7 +201,37 @@ export default function NotificationPreferencesPage() {
         ]} />
 
         <h1 className="text-2xl font-black text-slate-900 mb-2">Préférences de notification</h1>
-        <p className="text-sm text-slate-500 mb-8">Choisissez les notifications que vous souhaitez recevoir.</p>
+        <p className="text-sm text-slate-500 mb-6">Choisissez les notifications que vous souhaitez recevoir.</p>
+
+        {/* Notifications push : réglage propre à l'appareil, distinct des
+            préférences enregistrées sur le compte — d'où le bloc séparé. */}
+        <Card className="mb-6 p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-slate-900">Notifications push</p>
+              <p className="text-xs text-slate-500">
+                Recevez les alertes même quand l&apos;onglet est fermé.{' '}
+                <span className="font-semibold text-slate-600">
+                  {pushState ? PUSH_LABEL[pushState] : 'Vérification…'}
+                </span>
+              </p>
+            </div>
+            <Button
+              onClick={handlePushToggle}
+              loading={pushBusy}
+              variant={pushState === 'subscribed' ? 'secondary' : 'primary'}
+              disabled={pushState === 'unsupported' || pushState === 'not-configured' || pushState === 'denied'}
+              className="w-full sm:w-auto"
+            >
+              {pushState === 'subscribed' ? 'Désactiver' : 'Activer'}
+            </Button>
+          </div>
+        </Card>
 
         <Card className="divide-y divide-slate-100">
           {PREFS_CONFIG.map((pref) => (
@@ -138,19 +243,25 @@ export default function NotificationPreferencesPage() {
                 <p className="text-sm font-bold text-slate-900">{pref.label}</p>
                 <p className="text-xs text-slate-500">{pref.description}</p>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={prefs[pref.key]}
-                onClick={() => setPrefs(prev => ({ ...prev, [pref.key]: !prev[pref.key] }))}
-                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
-                  prefs[pref.key] ? 'bg-blue-600' : 'bg-slate-200'
-                }`}
-              >
-                <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                  prefs[pref.key] ? 'translate-x-5' : 'translate-x-0'
-                }`} />
-              </button>
+
+              <div className="flex items-center gap-2">
+                <label className="inline-flex cursor-pointer items-center justify-end">
+                  <input
+                    type="checkbox"
+                    checked={prefs[pref.key]}
+                    onChange={() => setPrefs(prev => ({ ...prev, [pref.key]: !prev[pref.key] }))}
+                    aria-label={`Activer : ${pref.label}`}
+                    className="peer sr-only"
+                  />
+                  <div
+                    className={`relative h-5 w-9 rounded-full transition-colors duration-300 peer-focus:outline-none peer-focus:ring-4 ${
+                      prefs[pref.key] ? 'bg-blue-600 peer-focus:ring-blue-100' : 'bg-slate-300 peer-focus:ring-slate-100'
+                    } after:absolute after:start-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:bg-white after:transition-all after:content-[''] ${
+                      prefs[pref.key] ? 'peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full' : ''
+                    }`}
+                  />
+                </label>
+              </div>
             </div>
           ))}
         </Card>

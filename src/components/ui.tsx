@@ -1,6 +1,7 @@
 'use client';
 
-import { forwardRef, useRef, useEffect, useState, useCallback, ButtonHTMLAttributes, createContext, useContext } from 'react';
+import { forwardRef, useRef, useEffect, ButtonHTMLAttributes } from 'react';
+import Link from '@/components/Link';
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
@@ -94,6 +95,11 @@ export function Avatar({ src, name, size = 10, className = '' }: { src?: string 
   const initials = name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
   const sizeClass = AVATAR_SIZES[size] || 'w-10 h-10';
   if (src) {
+    // `src` est une URL d'avatar arbitraire (stockage Supabase, fournisseur
+    // OAuth…). next/image échoue de façon bloquante si l'hôte n'est pas déclaré
+    // dans next.config.ts : pour un avatar, dégrader vers <img> vaut mieux que
+    // casser la page.
+    // eslint-disable-next-line @next/next/no-img-element
     return <img src={src} alt={name} className={`${sizeClass} rounded-full object-cover border border-slate-200 shrink-0 ${className}`} loading="lazy" />;
   }
   return (
@@ -192,10 +198,11 @@ export function ConfirmDialog({ open, onClose, onConfirm, title, message, confir
 export function EmptyState({ icon, title, description, action }: { icon: string; title: string; description: string; action?: React.ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center py-12 text-center animate-[fadeSlideIn_0.3s_ease-out]">
-      <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mb-4 text-slate-400 transition-transform duration-300 hover:scale-110 hover:bg-slate-200">
-        <svg className="w-10 h-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
-        </svg>
+      {/* L'icône passée par l'appelant est affichée : la version précédente
+          rendait une icône « boîte de téléchargement » figée et ignorait la
+          prop `icon`, si bien que tous les états vides se ressemblaient. */}
+      <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mb-4 text-4xl text-slate-400 transition-transform duration-300 hover:scale-110 hover:bg-slate-200">
+        <span role="img" aria-hidden="true">{icon}</span>
       </div>
       <p className="font-bold text-slate-500 text-lg">{title}</p>
       <p className="text-sm text-slate-400 mt-1 max-w-sm leading-relaxed">{description}</p>
@@ -211,15 +218,15 @@ export function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
     <nav aria-label="Fil d'Ariane" className="mb-6">
       <ol className="flex items-center gap-1.5 text-sm text-slate-500 font-medium">
         <li>
-          <a href="/dashboard" className="hover:text-blue-600 transition-colors">
+          <Link href="/dashboard" className="hover:text-blue-600 transition-colors">
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
-          </a>
+          </Link>
         </li>
         {items.map((item, i) => (
           <li key={i} className="flex items-center gap-1.5">
             <svg className="w-3.5 h-3.5 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
             {item.href ? (
-              <a href={item.href} className="hover:text-blue-600 transition-colors">{item.label}</a>
+              <Link href={item.href} className="hover:text-blue-600 transition-colors">{item.label}</Link>
             ) : (
               <span className="text-slate-900 font-semibold">{item.label}</span>
             )}

@@ -30,7 +30,7 @@ export type ConnexionFormData = z.infer<typeof connexionSchema>;
 
 export const kycSchema = z.object({
   prenom: z.string().min(1, 'Prénom requis.').max(100),
-  nom_naissance: z.string().min(1, 'Nom de naissance requis.').max(100),
+  nom: z.string().min(1, 'Nom requis.').max(100),
   date_naissance: z.string().min(1, 'Date de naissance requise.'),
   nationalite: z.string().max(100).optional(),
   nom_entreprise: z.string().max(200).optional(),

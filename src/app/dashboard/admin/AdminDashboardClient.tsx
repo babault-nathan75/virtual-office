@@ -1,11 +1,10 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
 import { toast } from '@/components/Toast';
 import NotificationBell from '@/components/NotificationBell';
 import Link from '@/components/Link';
 import {
-  updateUserRoleAction,
   approveKycAction,
   rejectKycAction,
   AdminDashboardData
@@ -18,18 +17,8 @@ type Props = {
 };
 
 export default function AdminDashboardClient({ userId, userName, stats }: Props) {
-  const [showUsers, setShowUsers] = useState(false);
-  const [showKyc, setShowKyc] = useState(false);
-
-  const handleRoleChange = useCallback(async (targetUserId: string, newRole: string) => {
-    const result = await updateUserRoleAction(targetUserId, newRole);
-    if (result.error) toast.error(result.error.message);
-    else {
-      toast.success(`Rôle mis à jour : ${newRole}`);
-      window.location.reload();
-    }
-  }, []);
-
+  // `showUsers`/`showKyc` et `handleRoleChange` n'étaient rattachés à aucun
+  // rendu : le changement de rôle se fait depuis /dashboard/admin/utilisateurs.
   const handleKycApprove = useCallback(async (targetUserId: string) => {
     const result = await approveKycAction(targetUserId);
     if (result.error) toast.error(result.error.message);
@@ -124,7 +113,9 @@ export default function AdminDashboardClient({ userId, userName, stats }: Props)
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 border-l-4 border-l-amber-500">
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-bold text-lg text-slate-900">🪪 KYC en attente ({stats.kycPending.length})</h3>
-              <button onClick={() => setShowKyc(true)} className="text-sm font-bold text-blue-600 hover:underline">Voir tout</button>
+              {/* `setShowKyc(true)` n'était lu nulle part : le bouton était
+                  inerte. Il mène désormais à la page de gestion des KYC. */}
+              <Link href="/dashboard/admin/kyc" className="text-sm font-bold text-blue-600 hover:underline">Voir tout</Link>
             </div>
             <div className="space-y-2">
               {stats.kycPending.slice(0, 3).map(k => (

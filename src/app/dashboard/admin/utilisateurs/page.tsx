@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { Skeleton, SkeletonCard } from '@/components/Skeleton';
+import { ConfirmDialog } from '@/components/ui';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
@@ -36,6 +38,11 @@ export default function GestionUtilisateurs() {
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 50;
   const [total, setTotal] = useState(0);
+  const [confirmState, setConfirmState] = useState<
+    | { kind: 'demote'; userId: string; newRole: Profil['role'] }
+    | { kind: 'delete'; userId: string; nom: string }
+    | null
+  >(null);
 
   useEffect(() => {
     const run = async () => {
@@ -95,10 +102,10 @@ export default function GestionUtilisateurs() {
     return list;
   }, [users, filter, q]);
 
+  // Les confirmations natives (`window.confirm`) bloquent le rendu, ne sont pas
+  // stylables et sont ignorables dans certains navigateurs mobiles. Le dialogue
+  // du design system est utilisé à la place, pour deux actions irréversibles.
   const changeRole = async (userId: string, newRole: Profil['role']) => {
-    if (userId === me && newRole !== 'admin') {
-      if (!confirm('Vous êtes sur le point de retirer vos propres droits admin. Vous ne pourrez plus revenir en arrière depuis l\'interface. Continuer ?')) return;
-    }
     setUpdating(userId);
     setMessage({ text: '', type: '' });
     const { error } = await supabase.from('profils').update({ role: newRole }).eq('id', userId);
@@ -111,10 +118,7 @@ export default function GestionUtilisateurs() {
     setUpdating(null);
   };
 
-  // Nouvelle fonction pour gérer la suppression d'un utilisateur
   const deleteUser = async (userId: string) => {
-    if (!confirm("Voulez-vous vraiment supprimer cet utilisateur ? Cette action est irréversible.")) return;
-    
     setUpdating(userId);
     setMessage({ text: '', type: '' });
 
@@ -133,6 +137,7 @@ export default function GestionUtilisateurs() {
         setMessage({ text: 'Erreur lors de la suppression.', type: 'error' });
       }
     } catch (error) {
+      console.error('[admin/utilisateurs] Suppression échouée :', error);
       setMessage({ text: 'Erreur réseau.', type: 'error' });
     }
     setUpdating(null);
@@ -157,7 +162,17 @@ export default function GestionUtilisateurs() {
   }
 
   if (loading) {
-    return <div className="p-12 text-center text-slate-500 font-medium font-sans">Chargement...</div>;
+    return (
+      <div className="min-h-screen bg-slate-50 p-4 md:p-8">
+        <div className="max-w-7xl mx-auto space-y-4">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-4 w-40" />
+          <div className="space-y-3 pt-4">
+            {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const counts = users.reduce((acc, u) => {
@@ -276,7 +291,16 @@ export default function GestionUtilisateurs() {
                           <select
                             value={u.role}
                             disabled={isUpdating || isAdmin} // Impossible de modifier le rôle si c'est un admin
-                            onChange={e => changeRole(u.id, e.target.value as Profil['role'])}
+                            onChange={e => {
+                              const newRole = e.target.value as Profil['role'];
+                              // Se retirer soi-même les droits admin est
+                              // irréversible depuis l'interface : confirmation.
+                              if (u.id === me && newRole !== 'admin') {
+                                setConfirmState({ kind: 'demote', userId: u.id, newRole });
+                                return;
+                              }
+                              void changeRole(u.id, newRole);
+                            }}
                             className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold bg-white outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             {ROLES.map(r => (
@@ -287,7 +311,7 @@ export default function GestionUtilisateurs() {
                           {/* Bouton de suppression, masqué ou désactivé pour les admins */}
                           <button
                             type="button"
-                            onClick={() => deleteUser(u.id)}
+                            onClick={() => setConfirmState({ kind: 'delete', userId: u.id, nom: u.nom })}
                             disabled={isUpdating || isAdmin}
                             title={isAdmin ? "Impossible de supprimer un administrateur" : "Supprimer l'utilisateur"}
                             className={`p-1.5 rounded-lg transition-colors ${isAdmin ? 'text-slate-300 cursor-not-allowed' : 'text-red-500 hover:bg-red-50 hover:text-red-700'}`}
@@ -333,6 +357,28 @@ export default function GestionUtilisateurs() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmState !== null}
+        onClose={() => setConfirmState(null)}
+        loading={updating !== null}
+        variant="danger"
+        title={confirmState?.kind === 'delete' ? 'Supprimer cet utilisateur ?' : 'Retirer vos droits administrateur ?'}
+        confirmLabel={confirmState?.kind === 'delete' ? 'Supprimer définitivement' : 'Retirer mes droits'}
+        message={
+          confirmState?.kind === 'delete'
+            ? `Le compte de ${confirmState.nom || 'cet utilisateur'} et ses données associées seront supprimés. Cette action est irréversible.`
+            : "Vous perdrez immédiatement l'accès à la console d'administration et ne pourrez pas revenir en arrière depuis l'interface."
+        }
+        onConfirm={() => {
+          if (!confirmState) return;
+          const action =
+            confirmState.kind === 'delete'
+              ? deleteUser(confirmState.userId)
+              : changeRole(confirmState.userId, confirmState.newRole);
+          void action.finally(() => setConfirmState(null));
+        }}
+      />
     </main>
   );
 }

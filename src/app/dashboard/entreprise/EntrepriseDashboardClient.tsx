@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from '@/components/Link';
 import { toast } from '@/components/Toast';
 import { ConfirmDialog } from '@/components/ui';
@@ -14,19 +14,34 @@ type Props = {
   userName: string;
 };
 
+// Fiche détaillée d'une secrétaire, chargée à la demande dans la modale.
+type SecretaireDetails = {
+  photo_url?: string | null;
+  bio?: string | null;
+  ville?: string | null;
+  disponibilite?: string | null;
+  niveau_etudes?: string | null;
+  annees_experience?: number | null;
+  competences?: string[] | null;
+  outils?: string[] | null;
+  soft_skills?: string[] | null;
+  langues?: string[] | null;
+};
+
 const DISPO_LABEL: Record<string, string> = {
   immediate: 'Immédiate', semaine: 'Sous une semaine', mois: 'Sous un mois', a_discuter: 'À discuter',
 };
 
 export default function EntrepriseDashboardClient({ initialData, userId, userName }: Props) {
-  const router = useRouter();
   const [missions, setMissions] = useState(initialData.missions);
   const [stats, setStats] = useState(initialData.stats);
   const [selectedSecretaire, setSelectedSecretaire] = useState<{id: string, nom: string} | null>(null);
-  const [detailsProfil, setDetailsProfil] = useState<any>(null);
+  const [detailsProfil, setDetailsProfil] = useState<SecretaireDetails | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void; variant?: 'danger' | 'warning' }>({ open: false, title: '', message: '', onConfirm: () => {} });
   const [confirmLoading, setConfirmLoading] = useState(false);
+
+  useEscapeKey(selectedSecretaire !== null, () => setSelectedSecretaire(null));
 
   const refuserCandidature = useCallback(async (missionId: number, candidatureId: number) => {
     setMissions(prev => prev.map(m =>
@@ -82,13 +97,23 @@ export default function EntrepriseDashboardClient({ initialData, userId, userNam
 
   const ouvrirProfil = useCallback(async (secretaireId: string, secretaireNom: string) => {
     setSelectedSecretaire({ id: secretaireId, nom: secretaireNom });
+    setDetailsProfil(null);
     setLoadingDetails(true);
     try {
       const res = await fetch(`/api/secretaire/${secretaireId}/profil`);
-      const data = await res.json();
-      if (data) setDetailsProfil(data);
-    } catch { toast.error('Erreur chargement profil'); }
-    setLoadingDetails(false);
+      // Le statut HTTP était ignoré : une réponse d'erreur JSON était traitée
+      // comme un profil valide et affichée telle quelle.
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body.error || 'Profil indisponible.');
+        return;
+      }
+      setDetailsProfil(await res.json());
+    } catch {
+      toast.error('Erreur chargement profil');
+    } finally {
+      setLoadingDetails(false);
+    }
   }, []);
 
   return (
@@ -221,8 +246,8 @@ export default function EntrepriseDashboardClient({ initialData, userId, userNam
         )}
 
         {selectedSecretaire && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+          <div role="dialog" aria-modal="true" aria-label="Profil de la secrétaire" className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setSelectedSecretaire(null)}>
+            <div onClick={e => e.stopPropagation()} className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
               <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                 <h3 className="text-xl font-bold text-gray-800">Profil de {selectedSecretaire.nom}</h3>
                 <button onClick={() => setSelectedSecretaire(null)} className="text-gray-400 hover:text-black text-2xl font-light">&times;</button>
@@ -233,6 +258,9 @@ export default function EntrepriseDashboardClient({ initialData, userId, userNam
                     <div className="flex gap-4 items-start">
                       <div className="w-20 h-20 rounded-2xl bg-slate-100 border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center text-3xl">
                         {detailsProfil.photo_url ? (
+                          /* URL de photo fournie par l'utilisateur : next/image
+                             lève une erreur bloquante sur un hôte non déclaré. */
+                          // eslint-disable-next-line @next/next/no-img-element
                           <img src={detailsProfil.photo_url} alt="Photo" className="w-full h-full object-cover" />
                         ) : <span className="text-slate-300">👤</span>}
                       </div>
@@ -259,11 +287,11 @@ export default function EntrepriseDashboardClient({ initialData, userId, userNam
                       <p className="text-[10px] text-blue-500 uppercase font-bold tracking-widest mb-1">💼 Tarif</p>
                       <p className="text-sm text-blue-900 font-medium leading-relaxed">Le tarif de la prestation est fixé par la plateforme lors de la mise en relation, en fonction du volume et du type de mission.</p>
                     </div>
-                    {detailsProfil.competences?.length > 0 && (
+                    {(detailsProfil.competences?.length ?? 0) > 0 && (
                       <div>
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Compétences</p>
                         <div className="flex flex-wrap gap-1.5">
-                          {detailsProfil.competences.map((c: string, i: number) => (
+                          {detailsProfil.competences!.map((c: string, i: number) => (
                             <span key={i} className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg text-xs font-bold">{c}</span>
                           ))}
                         </div>
@@ -303,7 +331,7 @@ export default function EntrepriseDashboardClient({ initialData, userId, userNam
                       <p className="text-xs text-amber-900 leading-relaxed font-medium">🔒 Pour des raisons de confidentialité, le numéro de téléphone et les coordonnées personnelles restent <b>masqués</b>. Acceptez la candidature pour déclencher la mise en relation par la plateforme.</p>
                     </div>
                   </div>
-                ) : <p className="text-center text-gray-400 italic text-sm">Ce profil n'est pas encore complété.</p>}
+                ) : <p className="text-center text-gray-400 italic text-sm">Ce profil n&apos;est pas encore complété.</p>}
               </div>
             </div>
           </div>

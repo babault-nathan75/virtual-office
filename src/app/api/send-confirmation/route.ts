@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { escapeHtml } from '@/lib/sanitize';
 import { z } from 'zod';
-import { checkRateLimit } from '@/lib/rateLimit';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -28,7 +28,7 @@ const confirmSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const rateLimitResult = await checkRateLimit('send-confirmation', 3, 300000);
+  const rateLimitResult = await checkRateLimit(`send-confirmation:${getClientIp(request)}`, 3, 300000);
   if (!rateLimitResult.allowed) {
     return NextResponse.json({ error: 'Trop de requêtes. Réessayez dans 5 minutes.' }, { status: 429 });
   }

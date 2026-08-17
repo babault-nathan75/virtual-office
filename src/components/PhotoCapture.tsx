@@ -2,6 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui';
+import { toast } from '@/components/Toast';
 
 type PhotoCaptureProps = {
   onCapture: (file: File) => void;
@@ -22,6 +23,7 @@ export function PhotoCapture({
 }: PhotoCaptureProps) {
   const [preview, setPreview] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [isPdf, setIsPdf] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [cameraAvailable, setCameraAvailable] = useState<boolean | null>(null);
@@ -61,14 +63,24 @@ export function PhotoCapture({
     };
   }, [stream]);
 
+  useEffect(() => {
+    if (!showCamera) return;
+    if (videoRef.current && stream) videoRef.current.srcObject = stream;
+  }, [showCamera, stream]);
+
   const handleFile = useCallback((file: File) => {
     if (file.size > maxSize) {
-      alert(`Fichier trop volumineux. Maximum : ${Math.round(maxSize / 1024 / 1024)} Mo`);
+      toast.error(`Fichier trop volumineux. Maximum : ${Math.round(maxSize / 1024 / 1024)} Mo`);
       return;
     }
     setFileName(file.name);
-    const url = URL.createObjectURL(file);
-    setPreview(url);
+    setIsPdf(file.type === 'application/pdf');
+    // L'URL objet précédente est libérée : sans révocation, chaque nouveau
+    // choix de fichier laissait un blob en mémoire jusqu'au rechargement.
+    setPreview(prev => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
     onCapture(file);
     stopStream();
     setShowCamera(false);
@@ -113,8 +125,12 @@ export function PhotoCapture({
   }, [handleFile]);
 
   const reset = useCallback(() => {
-    setPreview(null);
+    setPreview(prev => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
     setFileName(null);
+    setIsPdf(false);
     stopStream();
     setShowCamera(false);
   }, [stopStream]);
@@ -123,7 +139,19 @@ export function PhotoCapture({
     return (
       <div className="relative">
         <div className="relative rounded-2xl overflow-hidden border-2 border-emerald-200 bg-emerald-50">
-          <img src={preview} alt="Aperçu" className="w-full h-48 object-cover" />
+          {/* Un PDF ne s'affiche pas dans une balise <img> : on montre une
+              vignette explicite plutôt qu'une image cassée. */}
+          {isPdf ? (
+            <div className="w-full h-48 flex flex-col items-center justify-center bg-slate-50 text-slate-500">
+              <span className="text-4xl mb-2">📄</span>
+              <span className="text-xs font-bold">Document PDF</span>
+            </div>
+          ) : (
+            /* `preview` est une blob: URL locale (URL.createObjectURL), que
+               l'optimiseur d'images de Next.js ne peut pas charger. */
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={preview} alt="Aperçu" className="w-full h-48 object-cover" />
+          )}
           <div className="absolute top-2 right-2">
             <button
               onClick={reset}
@@ -138,7 +166,6 @@ export function PhotoCapture({
             <span className="text-sm font-bold text-slate-700 truncate">{fileName}</span>
           </div>
         </div>
-        <canvas ref={canvasRef} className="hidden" />
       </div>
     );
   }
@@ -148,6 +175,7 @@ export function PhotoCapture({
       <div className="space-y-3">
         <div className="relative rounded-2xl overflow-hidden border-2 border-blue-200 bg-black">
           <video ref={videoRef} autoPlay playsInline muted className="w-full h-64 object-cover" />
+          <canvas ref={canvasRef} className="hidden" />
           <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-3">
             <Button type="button" onClick={takePhoto} variant="primary" className="rounded-full px-6">
               📸 Prendre la photo

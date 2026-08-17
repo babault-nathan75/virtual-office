@@ -98,13 +98,30 @@ export function ToastContainer() {
   }, [handlePause]);
 
   useEffect(() => {
-    return () => { timers.current.forEach(t => clearTimeout(t)); timers.current.clear(); };
+    // La Map est capturée dans une variable locale : lire `timers.current` au
+    // moment du nettoyage viserait potentiellement une autre valeur que celle
+    // observée à l'exécution de l'effet.
+    const pendingTimers = timers.current;
+    return () => {
+      pendingTimers.forEach(t => clearTimeout(t));
+      pendingTimers.clear();
+    };
   }, []);
 
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 max-w-sm w-full pointer-events-none" role="status" aria-live="polite">
+    /*
+     * Sur mobile, les toasts étaient ancrés en bas à droite et passaient sous
+     * la barre de navigation fixe : le message et son bouton « Annuler »
+     * devenaient invisibles. Ils sont désormais pleine largeur au-dessus de la
+     * barre, et reprennent leur position d'origine à partir de `sm`.
+     */
+    <div
+      className="fixed inset-x-3 bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] z-[100] flex flex-col gap-2 pointer-events-none sm:inset-x-auto sm:bottom-6 sm:right-6 sm:w-full sm:max-w-sm"
+      role="status"
+      aria-live="polite"
+    >
       {toasts.map(t => (
         <div
           key={t.id}

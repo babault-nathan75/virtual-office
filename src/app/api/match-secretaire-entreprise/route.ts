@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
   }
 
   const ip = req.headers.get('x-forwarded-for') ?? 'anonymous';
-  const { allowed, remaining } = rateLimit(`match-entreprise:${ip}`, 10, 60_000);
+  const { allowed } = rateLimit(`match-entreprise:${ip}`, 10, 60_000);
   if (!allowed) {
     console.warn(`[RATE_LIMIT] match-entreprise IP=${ip}`);
     return NextResponse.json({ error: 'Trop de requêtes. Réessayez dans 1 minute.' }, { status: 429 });

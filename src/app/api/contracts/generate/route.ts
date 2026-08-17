@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { escapeHtml } from '@/lib/sanitize';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { z } from 'zod';
-import { checkRateLimit } from '@/lib/rateLimit';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 
 const contractSchema = z.object({
   entrepriseNom: z.string().min(1).max(200),
@@ -150,7 +150,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
     }
 
-    const rateLimitResult = await checkRateLimit('contracts', 5, 60000);
+    const rateLimitResult = await checkRateLimit(`contracts:${getClientIp(request)}`, 5, 60000);
     if (!rateLimitResult.allowed) {
       return NextResponse.json({ error: 'Trop de requêtes.' }, { status: 429 });
     }

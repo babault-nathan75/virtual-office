@@ -1,8 +1,20 @@
 import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
+import { createClient } from '@supabase/supabase-js';
 import { escapeHtml } from '@/lib/sanitize';
 import { z } from 'zod';
 import { checkRateLimit } from '@/lib/rateLimit';
+import { getAuthenticatedUser } from '@/lib/auth';
+
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  { auth: { persistSession: false } }
+);
+
+const SITE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL ||
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://secretariatpro-drab.vercel.app');
 
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
@@ -14,38 +26,83 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// Le client ne fournit qu'un destinataire ; l'adresse email, le nom de
+// l'expéditeur et le contenu sont résolus côté serveur à partir de la base.
+// Sans cela, la route est un relais d'emails ouvert (phishing / spam).
 const notifySchema = z.object({
-  recipientEmail: z.string().email(),
-  recipientName: z.string().max(200).optional(),
-  senderName: z.string().min(1).max(200),
-  messageCount: z.number().int().min(1).max(1000),
-  lastMessage: z.string().max(1000),
+  recipientId: z.string().uuid(),
 });
 
 export async function POST(request: Request) {
-  const rateLimitResult = await checkRateLimit('send-msg-notif', 10, 60000);
+  const sender = await getAuthenticatedUser();
+  if (!sender) {
+    return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
+  }
+
+  const rateLimitResult = await checkRateLimit(`send-msg-notif:${sender.id}`, 10, 60000);
   if (!rateLimitResult.allowed) {
     return NextResponse.json({ error: 'Trop de requêtes.' }, { status: 429 });
   }
 
-  const body = await request.json();
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Corps JSON invalide' }, { status: 400 });
+  }
+
   const parsed = notifySchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: 'Données invalides' }, { status: 400 });
   }
 
-  const { recipientEmail, recipientName, senderName, messageCount, lastMessage } = parsed.data;
+  const { recipientId } = parsed.data;
+
+  if (recipientId === sender.id) {
+    return NextResponse.json({ error: 'Destinataire invalide' }, { status: 400 });
+  }
 
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
     console.error('[send-message-notification] SMTP credentials missing');
     return NextResponse.json({ error: 'SMTP not configured' }, { status: 500 });
   }
 
+  const [{ data: recipient }, { data: senderProfile }] = await Promise.all([
+    supabaseAdmin.from('profils').select('nom, email').eq('id', recipientId).maybeSingle(),
+    supabaseAdmin.from('profils').select('nom').eq('id', sender.id).maybeSingle(),
+  ]);
+
+  if (!recipient?.email) {
+    return NextResponse.json({ error: 'Destinataire introuvable' }, { status: 404 });
+  }
+
+  // On ne notifie que s'il existe réellement des messages non lus de cet
+  // expéditeur vers ce destinataire.
+  const { data: unread } = await supabaseAdmin
+    .from('messages')
+    .select('content, created_at')
+    .eq('sender_id', sender.id)
+    .eq('receiver_id', recipientId)
+    .eq('read', false)
+    .order('created_at', { ascending: false })
+    .limit(1000);
+
+  const messageCount = unread?.length ?? 0;
+  if (messageCount === 0) {
+    return NextResponse.json({ success: false, reason: 'Aucun message non lu' });
+  }
+
+  const recipientName = recipient.nom || '';
+  const senderName = senderProfile?.nom || 'Un utilisateur';
+  const lastMessage = unread?.[0]?.content ?? '';
+
   try {
     await transporter.sendMail({
       from: `"SecrétariatPro" <${process.env.SMTP_USER}>`,
-      to: recipientEmail,
-      subject: `Messages non lus de ${escapeHtml(senderName)} - SecrétariatPro`,
+      to: recipient.email,
+      // Le sujet est du texte brut : pas d'échappement HTML ici, sinon les
+      // apostrophes s'affichent en « &#x27; » dans la boîte de réception.
+      subject: `Messages non lus de ${senderName} - SecrétariatPro`,
       html: `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
@@ -66,7 +123,7 @@ Vous avez <strong>${messageCount} message${messageCount > 1 ? 's' : ''} non lu${
 <p style="color:#475569;font-size:14px;margin:0;font-style:italic;">"${escapeHtml(lastMessage.length > 100 ? lastMessage.slice(0, 100) + '...' : lastMessage)}"</p>
 </div>
 <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:0 0 32px;">
-<a href="${process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('.supabase.co', '')}/dashboard/messages" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#ffffff;padding:16px 48px;border-radius:12px;text-decoration:none;font-size:16px;font-weight:700;display:inline-block;box-shadow:0 4px 12px rgba(37,99,235,0.3);">
+<a href="${SITE_URL}/dashboard/messages" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#ffffff;padding:16px 48px;border-radius:12px;text-decoration:none;font-size:16px;font-weight:700;display:inline-block;box-shadow:0 4px 12px rgba(37,99,235,0.3);">
 Répondre maintenant
 </a>
 </td></tr></table>

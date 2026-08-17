@@ -5,7 +5,7 @@ import QRCode from 'qrcode';
 import crypto from 'crypto';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { z } from 'zod';
-import { checkRateLimit } from '@/lib/rateLimit';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -18,7 +18,7 @@ const setupSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const rateLimitResult = await checkRateLimit('2fa-setup', 5, 60000);
+  const rateLimitResult = await checkRateLimit(`2fa-setup:${getClientIp(request)}`, 5, 60000);
   if (!rateLimitResult.allowed) {
     return NextResponse.json({ error: 'Trop de requêtes. Réessayez plus tard.' }, { status: 429 });
   }

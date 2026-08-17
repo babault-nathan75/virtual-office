@@ -135,7 +135,7 @@ export default function AdminMessagesPage() {
         {/* Navigation */}
         <div className="mb-5">
           <Link
-            href="/admin"
+            href="/dashboard/admin"
             className="group inline-flex items-center gap-2 rounded-xl px-1 py-2 text-sm font-semibold text-slate-500 transition hover:text-slate-900"
           >
             <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white shadow-sm transition group-hover:border-slate-300 group-hover:bg-slate-50">

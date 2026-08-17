@@ -1,10 +1,9 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import Link from '@/components/Link';
 import { toast } from '@/components/Toast';
-import NotificationBell from '@/components/NotificationBell';
 import KycStatusBanner from '@/components/KycStatusBanner';
 import { postulerAction } from '@/lib/data/secretaire-client';
 
@@ -18,13 +17,24 @@ type Mission = {
   candidatures?: { id: number; statut: string; secretaire_id: string }[];
 };
 
+// Les relations imbriquées PostgREST sont typées « tableau ou objet » : le
+// client Supabase les infère en tableau alors qu'une relation « plusieurs vers
+// un » renvoie un objet. Les deux formes sont donc acceptées et normalisées
+// par `unwrapRelation`.
+type Relation<T> = T[] | T | null | undefined;
+
+function unwrapRelation<T>(value: Relation<T>): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
 type Candidature = {
   id?: number;
   mission_id: number;
   statut: string;
   created_at?: string;
   secretaire_id?: string;
-  mission?: { id: number; titre: string };
+  mission?: Relation<{ id: number; titre: string }>;
 };
 
 type Offre = {
@@ -34,8 +44,8 @@ type Offre = {
   created_at: string;
   entreprise_id: string;
   mission_id: number | null;
-  entreprise: { id: string; nom: string }[] | { id: string; nom: string } | null;
-  mission: { id: number; titre: string } | null;
+  entreprise: Relation<{ id: string; nom: string }>;
+  mission: Relation<{ id: number; titre: string }>;
 };
 
 type Props = {
@@ -61,10 +71,10 @@ export default function SecretaireDashboardClient({
   candidatures,
   offres
 }: Props) {
-  const router = useRouter();
   const [missionsState, setMissionsState] = useState<Mission[]>(missions);
   const [candidaturesState, setCandidaturesState] = useState<Candidature[]>(candidatures);
-  const [offresState, setOffresState] = useState<Offre[]>(offres);
+  // `offres` n'est jamais modifié côté client : la copie dans un état
+  // local était inutile (le setter n'était appelé nulle part).
 
   const postuler = useCallback(async (missionId: number) => {
     const mission = missionsState.find(m => m.id === missionId);
@@ -107,21 +117,26 @@ export default function SecretaireDashboardClient({
       <div className="max-w-6xl mx-auto">
         {/* HEADER */}
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-sm mb-8 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 opacity-60 pointer-events-none" />
+          <div className="absolute top-0 right-0 w-64 h-64 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 opacity-60 pointer-events-none" />
           <div className="flex items-center gap-5 flex-1 w-full relative z-10">
-            <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-inner overflow-hidden shrink-0 flex items-center justify-center text-3xl ring-4 ring-white">
+            <div className="w-20 h-20 md:w-20 md:h-20 rounded-lg shadow-inner overflow-hidden shrink-0 flex items-center justify-center text-3xl ring-4 ring-white">
               {userAvatar ? (
+                /* L'URL de la photo est fournie par l'utilisateur : next/image
+                   lève une erreur bloquante si son hôte n'est pas déclaré dans
+                   next.config.ts, ce qui casserait toute la page. */
+                // eslint-disable-next-line @next/next/no-img-element
                 <img src={userAvatar} alt="Profil" className="w-full h-full object-cover" />
               ) : (
-                <span>🧑‍💻</span>
+                // Ressource locale au lieu du CDN flaticon : une image tierce
+                // sur le tableau de bord est une dépendance externe inutile.
+                <Image src="/avatar-placeholder.png" alt="Profil" width={80} height={80} className="w-full h-full object-cover" />
               )}
             </div>
             <div className="flex-1 w-full">
               <div className="flex items-center justify-between xl:justify-start gap-4">
-                <h1 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900">
+                <h1 className="text-2xl md:text-3xl sm:text-sm font-black tracking-tight text-slate-900">
                   Bonjour, {userName}
                 </h1>
-                <NotificationBell userId={userId} role="secretaire" />
               </div>
               <div className="mt-3 max-w-md">
                 <div className="flex justify-between items-end mb-1.5">
@@ -138,12 +153,32 @@ export default function SecretaireDashboardClient({
                     style={{ width: `${completion}%` }}
                   />
                 </div>
-                {completion < 100 && (
+                {completion !== 100 && completion < 100 && (
                   <p className="text-xs text-slate-500 mt-2 font-medium flex items-center gap-1.5">
                     <span className="text-amber-500">💡</span>Complétez votre profil pour attirer plus d&apos;entreprises.
-                    <a href="/dashboard/secretaire/profil" className="text-blue-600 hover:underline font-semibold ml-1">
+                    <Link
+                      href="/dashboard/secretaire/profil"
+                      className="ml-1 inline-flex items-center text-white bg-blue-600 border border-transparent hover:bg-blue-700 focus:ring-4 focus:ring-blue-200 shadow-sm font-medium leading-5 rounded-lg text-sm px-4 py-2.5 focus:outline-none transition-colors"
+                    >
                       Compléter
-                    </a>
+                      <svg
+                        className="w-4 h-4 ms-1.5 rtl:rotate-180 -me-0.5"
+                        aria-hidden="true"
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="24"
+                        height="24"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          d="M19 12H5m14 0-4 4m4-4-4-4"
+                        />
+                      </svg>
+                    </Link>
                   </p>
                 )}
                 {(!kycApproved || !twoFactorEnabled) && (
@@ -157,11 +192,23 @@ export default function SecretaireDashboardClient({
               </div>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto relative z-10">
-            <Link href="/dashboard/secretaire/profil" className="flex-1 xl:flex-none text-center bg-slate-900 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-slate-800 transition shadow-sm">Modifier le profil</Link>
-            <Link href="/dashboard/kyc" className="flex-1 xl:flex-none text-center bg-white border border-slate-200 text-slate-600 px-4 py-2.5 rounded-xl font-semibold hover:border-blue-300 hover:bg-blue-50 transition" title="Vérification d'identité">🪪 KYC</Link>
-            <Link href="/dashboard/profil/2fa" className="flex-1 xl:flex-none text-center bg-white border border-slate-200 text-slate-600 px-4 py-2.5 rounded-xl font-semibold hover:border-blue-300 hover:bg-blue-50 transition" title="Double authentification">🔐 2FA</Link>
-            <Link href="/dashboard/secretaire/avis" className="flex-1 xl:flex-none text-center bg-amber-50 border border-amber-200 text-amber-700 px-4 py-2.5 rounded-xl font-semibold hover:bg-amber-100 transition">⭐ Avis</Link>
+          <div className="grid grid-cols-2 lg:flex lg:flex-wrap items-center gap-3 lg:gap-8 w-full lg:w-auto relative z-10">
+            <Link href="/dashboard/secretaire/profil" className="col-span-2 lg:col-auto text-center bg-slate-900 text-white px-4 lg:px-5 py-2.5 rounded-xl font-bold hover:bg-slate-800 transition shadow-sm text-sm lg:text-base">Modifier le profil</Link>
+            <Link
+              href="/dashboard/kyc"
+              className={`text-center bg-white border border-slate-200 text-slate-600 px-3 lg:px-4 py-2.5 rounded-xl font-semibold hover:border-blue-300 hover:bg-blue-50 transition text-sm lg:text-base ${kycApproved ? 'hidden' : ''}`}
+              title="Vérification d'identité"
+            >
+              KYC
+            </Link>
+            <Link
+              href="/dashboard/profil/2fa"
+              className={`text-center bg-white border border-slate-200 text-slate-600 px-3 lg:px-4 py-2.5 rounded-xl font-semibold hover:border-blue-300 hover:bg-blue-50 transition text-sm lg:text-base ${twoFactorEnabled ? 'hidden' : ''}`}
+              title="Double authentification"
+            >
+              🔐 2FA
+            </Link>
+            <Link href="/dashboard/secretaire/avis" className="text-center bg-amber-50 border border-amber-200 text-amber-700 px-3 lg:px-4 py-2.5 rounded-xl font-semibold hover:bg-amber-100 transition text-sm lg:text-base">⭐ Avis</Link>
           </div>
         </div>
 
@@ -188,7 +235,7 @@ export default function SecretaireDashboardClient({
               <div className="space-y-4">
                 {missionsState.map((m) => {
                   const dejaPostule = candidaturesState.some(c => c.mission_id === m.id);
-                  const ent = Array.isArray(m.entreprise) ? m.entreprise[0] : m.entreprise;
+                  const ent = unwrapRelation(m.entreprise);
                   const entrepriseNom = ent?.nom;
                   return (
                     <div key={m.id} className="group bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-blue-200 transition-all duration-200 flex flex-col sm:flex-row gap-5">
@@ -230,14 +277,14 @@ export default function SecretaireDashboardClient({
             <section>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-black tracking-tight text-slate-900 flex items-center gap-2">📩 Offres directes</h2>
-                {offresState.filter(o => o.statut === 'en_attente').length > 0 && (
+                {offres.filter(o => o.statut === 'en_attente').length > 0 && (
                   <span className="bg-blue-600 text-white text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full shadow-sm">
-                    {offresState.filter(o => o.statut === 'en_attente').length}
+                    {offres.filter(o => o.statut === 'en_attente').length}
                   </span>
                 )}
               </div>
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                {offresState.length === 0 ? (
+                {offres.length === 0 ? (
                   <div className="p-8 text-center">
                     <div className="w-12 h-12 mx-auto rounded-xl bg-slate-50 flex items-center justify-center mb-3">
                       <svg className="w-6 h-6 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>
@@ -246,17 +293,17 @@ export default function SecretaireDashboardClient({
                   </div>
                 ) : (
                   <div className="divide-y divide-slate-100">
-                    {offresState.map(o => {
+                    {offres.map(o => {
                       const sty = OFFRE_STATUT_LABEL[o.statut] ?? OFFRE_STATUT_LABEL['en_attente'];
                       return (
                         <div key={o.id} className="p-4 hover:bg-slate-50 transition-colors">
                           <div className="flex justify-between items-start gap-2 mb-1">
-                            <p className="text-sm font-bold text-slate-900 truncate" title={Array.isArray(o.entreprise) ? o.entreprise[0]?.nom : o.entreprise?.nom}>
-                            {Array.isArray(o.entreprise) ? o.entreprise[0]?.nom : o.entreprise?.nom}</p>
+                            <p className="text-sm font-bold text-slate-900 truncate" title={unwrapRelation(o.entreprise)?.nom}>
+                            {unwrapRelation(o.entreprise)?.nom}</p>
                             <span className="text-[10px] text-slate-400 font-medium shrink-0">{formatDate(o.created_at)}</span>
                           </div>
                           <p className="text-xs text-slate-600 mb-2 truncate">
-                            {o.mission?.titre ? `Mission : ${o.mission.titre}` : 'Proposition de mission'}
+                            {unwrapRelation(o.mission)?.titre ? `Mission : ${unwrapRelation(o.mission)?.titre}` : 'Proposition de mission'}
                           </p>
                           <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide border ${sty.color}`}>
                             <span className={`w-1.5 h-1.5 rounded-full ${sty.dot}`}></span>
@@ -285,7 +332,7 @@ export default function SecretaireDashboardClient({
                   <div className="divide-y divide-slate-100 max-h-[400px] overflow-y-auto">
                     {candidaturesState.map((c, idx) => (
                       <div key={idx} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50 transition-colors">
-                        <span className="text-sm font-bold text-slate-800 line-clamp-2 leading-tight">{c.mission?.titre}</span>
+                        <span className="text-sm font-bold text-slate-800 line-clamp-2 leading-tight">{unwrapRelation(c.mission)?.titre}</span>
                         <span className={`shrink-0 inline-flex items-center justify-center text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-md border ${
                           c.statut === 'acceptee' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                           : c.statut === 'refusee' ? 'bg-red-50 text-red-700 border-red-200'

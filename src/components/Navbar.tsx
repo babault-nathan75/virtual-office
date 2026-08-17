@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 
 import Link from '@/components/Link';
 import NotificationBell from '@/components/NotificationBell';
 import { supabase } from '@/lib/supabaseClient';
+import { setCachedRole, clearCachedRole } from '@/lib/roleStore';
 
 type UserRole = 'entreprise' | 'secretaire' | 'admin';
 
@@ -109,19 +110,24 @@ export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
+  // Valeur neutre au premier rendu : lire localStorage à l'initialisation
+  // désynchroniserait le rendu client du rendu serveur.
   const [userRole, setUserRole] = useState<UserRole>('entreprise');
   const [userSpecialite, setUserSpecialite] = useState<string | null>(null);
 
-  const router = useRouter();
   const pathname = usePathname();
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     const resolveRole = async (currentUser: User) => {
       const metadata = currentUser.user_metadata as UserMetadata;
-      const fallbackRole = (metadata?.role as UserRole | undefined) || 'entreprise';
+      // user_metadata est modifiable par le client : « admin » n'y est jamais
+      // accepté comme rôle de repli.
+      const metaRole = metadata?.role as string | undefined;
+      const fallbackRole: UserRole = metaRole === 'secretaire' ? 'secretaire' : 'entreprise';
 
       const { data: profil, error } = await supabase
         .from('profils')
@@ -130,6 +136,7 @@ export default function Navbar() {
         .maybeSingle();
 
       if (!error && profil?.role) {
+        setCachedRole(profil.role as UserRole, currentUser.id);
         if (!cancelled) setUserRole(profil.role as UserRole);
         if (profil.role === 'secretaire') {
           const { data: secProfil } = await supabase
@@ -152,15 +159,17 @@ export default function Navbar() {
             userId: currentUser.id,
             nom,
             role: fallbackRole,
-            email: currentUser.email,
           }),
         });
 
         if (!response.ok) throw new Error(`ensure-profile: HTTP ${response.status}`);
 
         const data = await response.json();
-        if (!cancelled) setUserRole((data.role as UserRole | undefined) || fallbackRole);
+        const resolvedRole = (data.role as UserRole | undefined) || fallbackRole;
+        setCachedRole(resolvedRole, currentUser.id);
+        if (!cancelled) setUserRole(resolvedRole);
       } catch {
+        setCachedRole(fallbackRole, currentUser.id);
         if (!cancelled) setUserRole(fallbackRole);
       }
     };
@@ -195,6 +204,7 @@ export default function Navbar() {
       if (nextUser) {
         void resolveRole(nextUser);
       } else {
+        clearCachedRole();
         setUserRole('entreprise');
         setUserSpecialite(null);
       }
@@ -208,8 +218,14 @@ export default function Navbar() {
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (dropdownRef.current && !dropdownRef.current.contains(target)) {
         setProfileOpen(false);
+      }
+      // Le menu mobile ne se fermait qu'au changement de page ou via Échap :
+      // un appui à côté le laissait ouvert par-dessus le contenu.
+      if (headerRef.current && !headerRef.current.contains(target)) {
+        setMobileOpen(false);
       }
     };
 
@@ -234,6 +250,7 @@ export default function Navbar() {
   }, [pathname]);
 
   const handleLogout = async () => {
+    clearCachedRole();
     await supabase.auth.signOut();
     setProfileOpen(false);
     setMobileOpen(false);
@@ -304,7 +321,7 @@ export default function Navbar() {
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-slate-200/80 bg-white/90 backdrop-blur-xl supports-[backdrop-filter]:bg-white/80">
+    <header ref={headerRef} className="sticky top-0 z-50 w-full border-b border-slate-200/80 bg-white/90 backdrop-blur-xl supports-[backdrop-filter]:bg-white/80">
       <div className="mx-auto flex h-[72px] max-w-[1380px] items-center gap-4 px-4 sm:px-6 lg:px-8">
         {/* Brand */}
         <Link
@@ -423,7 +440,7 @@ export default function Navbar() {
                       <svg aria-hidden="true" className="h-[18px] w-[18px] text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
                       </svg>
-                      Notifications
+                      Paramètres de notification
                     </Link>
 
                     <button
@@ -533,7 +550,7 @@ export default function Navbar() {
                     <svg aria-hidden="true" className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
                     </svg>
-                    Notifications
+                    Paramètres de notification
                   </Link>
                 </nav>
 

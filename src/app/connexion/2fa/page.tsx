@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from '@/components/Link';
@@ -74,10 +75,10 @@ function TwoFAContent() {
   };
 
   return (
-    <main className="min-h-screen flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-slate-50 to-blue-50/40 font-sans antialiased">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center mb-8">
+    <main id="main-content" className="min-h-screen flex flex-col items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-slate-50 to-blue-50/40 font-sans antialiased">
+      <div className="w-full max-w-lg text-center mb-8">
         <Link href="/" className="inline-flex flex-col items-center hover:opacity-90 transition">
-          <img src="/logo.png" alt="Logo SecrétariatPro" width={72} height={72} className="rounded-2xl mb-3 object-contain shadow-lg shadow-blue-100" />
+          <Image src="/logo.png" alt="Logo SecrétariatPro" width={72} height={72} className="rounded-2xl mb-3 object-contain shadow-lg shadow-blue-100" />
           <span className="text-2xl font-black tracking-tight text-slate-900">
             Secrétariat<span className="text-blue-600">Pro</span>
           </span>
@@ -86,7 +87,7 @@ function TwoFAContent() {
         <p className="mt-2 text-sm text-slate-500 font-medium">Entrez le code de votre application d&apos;authentification.</p>
       </div>
 
-      <div className="sm:mx-auto sm:w-full sm:max-w-md">
+      <div className="w-full max-w-lg">
         <div className="bg-white py-8 px-6 sm:px-10 rounded-3xl border border-slate-100 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.08)]">
 
           {error && (
