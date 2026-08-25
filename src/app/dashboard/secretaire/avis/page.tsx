@@ -5,6 +5,7 @@ import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { Skeleton, SkeletonCard } from '@/components/Skeleton';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from '@/components/Toast';
+import { formatDate } from '@/lib/i18n';
 
 type Mission = {
   id: number;
@@ -160,7 +161,7 @@ export default function RatingPage() {
                   <div>
                     <h3 className="font-black text-slate-900 tracking-tight">{m.titre}</h3>
                     <p className="text-xs text-slate-500 font-medium mt-0.5">
-                      {new Date(m.created_at).toLocaleDateString('fr-FR')}
+                      {formatDate(m.created_at)}
                     </p>
                   </div>
                   {reviewed ? (

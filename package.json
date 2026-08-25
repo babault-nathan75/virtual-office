@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "db:migrate": "node scripts/migrate.mjs",
+    "check:turnstile": "node scripts/check-turnstile.mjs",
     "analyze": "ANALYZE=true npm run build"
   },
   "dependencies": {

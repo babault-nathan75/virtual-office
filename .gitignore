@@ -39,6 +39,9 @@ dev-output.txt
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...sauf le gabarit, qui ne contient aucun secret et doit etre versionne :
+# sans lui, aucune indication sur les variables requises pour demarrer.
+!.env.example
 
 # vercel
 .vercel

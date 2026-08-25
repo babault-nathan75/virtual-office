@@ -46,9 +46,12 @@ describe('kycSchema', () => {
       }
     });
 
-    it('accepts whitespace-only prenom (no trim in schema)', () => {
+    // Le schéma applique désormais `.trim()` : un prénom fait uniquement
+    // d'espaces était accepté et enregistré tel quel dans le dossier KYC,
+    // rendant la fiche invérifiable par un administrateur.
+    it('rejects whitespace-only prenom', () => {
       const result = kycSchema.safeParse({ ...validData, prenom: '   ' });
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
     });
 
     it('accepts prenom with accents', () => {

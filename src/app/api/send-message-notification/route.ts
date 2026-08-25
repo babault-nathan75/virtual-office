@@ -1,30 +1,16 @@
 import { NextResponse } from 'next/server';
-import nodemailer from 'nodemailer';
-import { createClient } from '@supabase/supabase-js';
 import { escapeHtml } from '@/lib/sanitize';
 import { z } from 'zod';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { getAuthenticatedUser } from '@/lib/auth';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
+import { sendMail } from '@/lib/mailer';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
 
 const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ||
   (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://secretariatpro-drab.vercel.app');
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER!,
-    pass: process.env.SMTP_PASS!,
-  },
-});
 
 // Le client ne fournit qu'un destinataire ; l'adresse email, le nom de
 // l'expéditeur et le contenu sont résolus côté serveur à partir de la base.
@@ -68,8 +54,8 @@ export async function POST(request: Request) {
   }
 
   const [{ data: recipient }, { data: senderProfile }] = await Promise.all([
-    supabaseAdmin.from('profils').select('nom, email').eq('id', recipientId).maybeSingle(),
-    supabaseAdmin.from('profils').select('nom').eq('id', sender.id).maybeSingle(),
+    getSupabaseAdmin().from('profils').select('nom, email').eq('id', recipientId).maybeSingle(),
+    getSupabaseAdmin().from('profils').select('nom').eq('id', sender.id).maybeSingle(),
   ]);
 
   if (!recipient?.email) {
@@ -78,7 +64,7 @@ export async function POST(request: Request) {
 
   // On ne notifie que s'il existe réellement des messages non lus de cet
   // expéditeur vers ce destinataire.
-  const { data: unread } = await supabaseAdmin
+  const { data: unread } = await getSupabaseAdmin()
     .from('messages')
     .select('content, created_at')
     .eq('sender_id', sender.id)
@@ -97,8 +83,7 @@ export async function POST(request: Request) {
   const lastMessage = unread?.[0]?.content ?? '';
 
   try {
-    await transporter.sendMail({
-      from: `"SecrétariatPro" <${process.env.SMTP_USER}>`,
+    await sendMail({
       to: recipient.email,
       // Le sujet est du texte brut : pas d'échappement HTML ici, sinon les
       // apostrophes s'affichent en « &#x27; » dans la boîte de réception.

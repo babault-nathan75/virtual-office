@@ -1,13 +1,9 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 import { z } from 'zod';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 const readSchema = z.object({
   // `messages.id` est un UUID : le schéma n'acceptait que des entiers, donc
@@ -42,7 +38,7 @@ export async function POST(request: Request) {
 
   const { messageIds } = parsed.data;
 
-  const { data: messages, error: fetchError } = await supabaseAdmin
+  const { data: messages, error: fetchError } = await getSupabaseAdmin()
     .from('messages')
     .select('id, receiver_id')
     .in('id', messageIds)
@@ -63,7 +59,7 @@ export async function POST(request: Request) {
 
   const ownedIds = ownedMessages.map(m => m.id);
 
-  const { error } = await supabaseAdmin
+  const { error } = await getSupabaseAdmin()
     .from('messages')
     .update({ read: true, read_at: new Date().toISOString() })
     .in('id', ownedIds)

@@ -6,6 +6,7 @@ import { ConfirmDialog } from '@/components/ui';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
+import { formatDate } from '@/lib/i18n';
 
 type Profil = {
   id: string;
@@ -278,7 +279,7 @@ export default function GestionUtilisateurs() {
                         </td>
                         <td className="px-4 py-3 text-slate-600 hidden md:table-cell">{u.telephone || '—'}</td>
                         <td className="px-4 py-3 text-slate-500 text-xs hidden lg:table-cell">
-                          {new Date(u.created_at).toLocaleDateString('fr-FR')}
+                          {formatDate(u.created_at)}
                         </td>
                         <td className="px-4 py-3">
                           {/* Affichage de la spécialité au lieu du rôle */}

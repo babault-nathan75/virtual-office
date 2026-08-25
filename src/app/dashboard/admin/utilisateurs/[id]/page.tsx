@@ -5,6 +5,7 @@ import { Skeleton, SkeletonCard } from '@/components/Skeleton';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter, useParams } from 'next/navigation';
 import Link from '@/components/Link';
+import { formatDate } from '@/lib/i18n';
 
 type UserData = {
   id: string;
@@ -161,7 +162,7 @@ export default function DetailUtilisateur() {
               <h2 className="text-sm font-black uppercase tracking-widest text-slate-400 mb-3">Informations générales</h2>
               <div className="grid grid-cols-2 gap-4">
                 <InfoCell label="Téléphone" value={user.telephone} />
-                <InfoCell label="Inscrit le" value={new Date(user.created_at).toLocaleDateString('fr-FR')} />
+                <InfoCell label="Inscrit le" value={formatDate(user.created_at)} />
                 {user.role === 'secretaire' && (
                   <>
                     <InfoCell label="Spécialité" value={secProfil?.specialite} />

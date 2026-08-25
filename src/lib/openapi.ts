@@ -39,29 +39,146 @@ export const openApiSpec = {
         },
       },
     },
-    '/api/2fa/setup': {
+    '/api/auth/register': {
       post: {
-        tags: ['2FA'],
-        summary: 'Configurer la 2FA (QR code ou code email)',
-        security: [{ cookieAuth: [] }],
+        tags: ['Auth'],
+        summary: 'Créer un compte et envoyer le code de vérification',
+        description:
+          "Vérifie le jeton Turnstile, applique la politique de mot de passe côté serveur, crée le compte (email non confirmé) puis envoie un code à 6 chiffres. Aucune session n'est ouverte.",
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['userId', 'method'],
+                required: ['nom', 'email', 'telephone', 'password', 'role', 'turnstileToken'],
                 properties: {
-                  userId: { type: 'string', format: 'uuid' },
-                  method: { type: 'string', enum: ['totp', 'email'] },
+                  nom: { type: 'string', minLength: 2, maxLength: 200 },
+                  email: { type: 'string', format: 'email' },
+                  telephone: { type: 'string' },
+                  password: { type: 'string', minLength: 12 },
+                  role: { type: 'string', enum: ['entreprise', 'secretaire'] },
+                  turnstileToken: { type: 'string' },
+                  website: { type: 'string', description: 'Champ leurre : doit rester vide.' },
                 },
               },
             },
           },
         },
         responses: {
-          '200': { description: 'QR code ou confirmation d\'envoi' },
+          '200': { description: 'Compte créé, code envoyé' },
+          '400': { description: 'Données invalides ou anti-robot refusé' },
+          '409': { description: 'Adresse email déjà utilisée' },
+          '429': { description: 'Trop de tentatives' },
+          '502': { description: "Envoi de l'email impossible" },
+          '503': { description: 'SMTP non configuré' },
+        },
+      },
+    },
+    '/api/auth/login': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Valider le mot de passe et déclencher le second facteur',
+        description:
+          "Aucune session n'est ouverte ici : un cookie de défi signé est posé et un code est envoyé par email (ou attendu de l'application TOTP).",
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['email', 'password', 'turnstileToken'],
+                properties: {
+                  email: { type: 'string', format: 'email' },
+                  password: { type: 'string' },
+                  turnstileToken: { type: 'string' },
+                  website: { type: 'string', description: 'Champ leurre : doit rester vide.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Second facteur requis' },
+          '401': { description: 'Identifiants incorrects' },
+          '403': { description: 'Adresse email non vérifiée' },
+          '429': { description: 'Trop de tentatives ou compte verrouillé' },
+        },
+      },
+    },
+    '/api/auth/verify': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Valider le second facteur et ouvrir la session',
+        description:
+          "Seul point de l'application qui crée une session par mot de passe. Pour « login », l'adresse provient du cookie de défi signé, jamais du corps de la requête.",
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['code', 'purpose'],
+                properties: {
+                  code: { type: 'string', pattern: '^[0-9]{6}$' },
+                  purpose: { type: 'string', enum: ['signup', 'login'] },
+                  email: {
+                    type: 'string',
+                    format: 'email',
+                    description: 'Requis pour « signup » uniquement.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Session ouverte' },
+          '400': { description: 'Code incorrect, expiré ou épuisé' },
+          '401': { description: 'Défi de connexion expiré' },
+          '429': { description: 'Trop de tentatives' },
+        },
+      },
+    },
+    '/api/auth/resend': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Renvoyer un code à usage unique',
+        description:
+          "La réponse ne distingue jamais une adresse inconnue d'un renvoi effectif, pour ne pas permettre l'énumération des comptes.",
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['purpose'],
+                properties: {
+                  purpose: { type: 'string', enum: ['signup', 'login'] },
+                  email: { type: 'string', format: 'email' },
+                  turnstileToken: { type: 'string', description: 'Requis pour « signup ».' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Code renvoyé' },
+          '429': { description: 'Délai anti-renvoi ou quota atteint' },
+        },
+      },
+    },
+    '/api/2fa/setup': {
+      post: {
+        tags: ['2FA'],
+        summary: "Démarrer l'enrôlement d'une application d'authentification",
+        description:
+          "L'identité provient de la session : aucun identifiant n'est accepté dans le corps de la requête.",
+        security: [{ cookieAuth: [] }],
+        responses: {
+          '200': { description: 'QR code et clé de secours' },
           '401': { description: 'Non autorisé' },
+          '409': { description: 'Déjà activé' },
           '429': { description: 'Trop de requêtes' },
         },
       },
@@ -69,7 +186,7 @@ export const openApiSpec = {
     '/api/2fa/verify': {
       post: {
         tags: ['2FA'],
-        summary: 'Vérifier le code 2FA et activer la 2FA',
+        summary: "Confirmer l'enrôlement de l'application d'authentification",
         security: [{ cookieAuth: [] }],
         requestBody: {
           required: true,
@@ -77,19 +194,17 @@ export const openApiSpec = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['userId', 'code'],
-                properties: {
-                  userId: { type: 'string', format: 'uuid' },
-                  code: { type: 'string', length: 6 },
-                },
+                required: ['code'],
+                properties: { code: { type: 'string', pattern: '^[0-9]{6}$' } },
               },
             },
           },
         },
         responses: {
-          '200': { description: '2FA activée' },
-          '400': { description: 'Code invalide' },
+          '200': { description: 'Second facteur activé' },
+          '400': { description: 'Code incorrect' },
           '401': { description: 'Non autorisé' },
+          '409': { description: 'Déjà activé' },
         },
       },
     },

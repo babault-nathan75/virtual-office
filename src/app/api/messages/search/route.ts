@@ -1,13 +1,9 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 import { z } from 'zod';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 const searchSchema = z.object({
   userId: z.string().uuid(),
@@ -51,7 +47,7 @@ export async function GET(request: Request) {
 
   const safeQ = escapeLike(q);
 
-  const { data: messages } = await supabaseAdmin
+  const { data: messages } = await getSupabaseAdmin()
     .from('messages')
     .select('id, sender_id, content, created_at')
     .or(`and(sender_id.eq.${userId},receiver_id.eq.${otherId}),and(sender_id.eq.${otherId},receiver_id.eq.${userId})`)

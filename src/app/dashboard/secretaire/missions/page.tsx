@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
 import { useDebounce } from '@/hooks/useDebounce';
+import { formatDate } from '@/lib/i18n';
 
 type Mission = {
   id: number;
@@ -254,7 +255,7 @@ export default function RechercherPoste() {
                       <p className="text-xs text-slate-500 font-medium mt-0.5">
                         Publiée par <b className="text-slate-700">{m.profils?.nom ?? '—'}</b>
                         {' · '}
-                        {new Date(m.created_at).toLocaleDateString('fr-FR')}
+                        {formatDate(m.created_at)}
                       </p>
                     </div>
                     {aiScore && (
@@ -302,12 +303,12 @@ export default function RechercherPoste() {
                     <div className="flex flex-wrap gap-3 mb-4 text-xs">
                       {m.date_debut && (
                         <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-md font-bold">
-                          Début : {new Date(m.date_debut).toLocaleDateString('fr-FR')}
+                          Début : {formatDate(m.date_debut)}
                         </span>
                       )}
                       {m.date_fin && (
                         <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-md font-bold">
-                          Fin : {new Date(m.date_fin).toLocaleDateString('fr-FR')}
+                          Fin : {formatDate(m.date_fin)}
                         </span>
                       )}
                     </div>

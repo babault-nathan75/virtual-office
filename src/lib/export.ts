@@ -1,3 +1,4 @@
+import { formatDateLong } from '@/lib/i18n';
 function escapeHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
@@ -60,7 +61,7 @@ export function exportToPDF(title: string, data: Record<string, unknown>[], file
 </head>
 <body>
   <h1>${escapeHtml(title)}</h1>
-  <p class="date">Généré le ${new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+  <p class="date">Généré le ${formatDateLong(Date.now())}</p>
   <table>
     <thead><tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
     <tbody>${data.map(row => `<tr>${headers.map(h => `<td>${escapeHtml(String(row[h] ?? ''))}</td>`).join('')}</tr>`).join('')}</tbody>

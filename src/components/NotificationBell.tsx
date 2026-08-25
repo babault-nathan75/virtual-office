@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from '@/components/Toast';
 import Link from '@/components/Link';
+import { LOCALE } from '@/lib/i18n';
 
 type Props = {
   userId: string;
@@ -634,7 +635,7 @@ export default function NotificationBell({ userId, role }: Props) {
                         <p className={`text-xs font-bold ${!item.read ? 'text-slate-900' : 'text-slate-600'}`}>{item.title}</p>
                         <p className="text-[11px] text-slate-400 truncate mt-0.5">{item.body}</p>
                         <p className="text-[10px] text-slate-300 mt-1 font-medium">
-                          {new Date(item.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {new Date(item.created_at).toLocaleDateString(LOCALE, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                         </p>
                       </div>
                       {!item.read && <div className="w-2 h-2 rounded-full bg-blue-500 mt-2 shrink-0" />}

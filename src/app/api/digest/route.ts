@@ -1,30 +1,20 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import nodemailer from 'nodemailer';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
+import { sendMail } from '@/lib/mailer';
+import { getSiteUrl } from '@/lib/env';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
 
 async function getWeeklyStats(userId: string) {
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  const { count: messages } = await supabase
+  const { count: messages } = await getSupabaseAdmin()
     .from('messages')
     .select('id', { count: 'exact', head: true })
     .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
     .gte('created_at', weekAgo);
 
-  const { count: unread } = await supabase
+  const { count: unread } = await getSupabaseAdmin()
     .from('messages')
     .select('id', { count: 'exact', head: true })
     .eq('receiver_id', userId)
@@ -57,7 +47,7 @@ function generateDigestHTML(userName: string, stats: { messages: number; unread:
       </div>
     </div>
   </div>
-  <a href="https://secretariatpro-drab.vercel.app/dashboard/messages" style="display: block; text-align: center; background: #2563eb; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; margin: 20px 0;">Voir mes discussions</a>
+  <a href="${getSiteUrl()}/dashboard/messages" style="display: block; text-align: center; background: #2563eb; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; margin: 20px 0;">Voir mes discussions</a>
   <p style="font-size: 11px; color: #94a3b8; text-align: center; margin-top: 30px;">Email automatique — SecrétariatPro</p>
 </body>
 </html>`;
@@ -73,7 +63,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { data: users } = await supabase
+    const { data: users } = await getSupabaseAdmin()
       .from('profils')
       .select('id, nom, email')
       .eq('email_digest', true);
@@ -91,8 +81,7 @@ export async function POST(request: Request) {
       // Un envoi en échec (adresse invalide, quota SMTP…) ne doit pas
       // interrompre le digest des autres utilisateurs.
       try {
-        await transporter.sendMail({
-          from: `"SecrétariatPro" <${process.env.SMTP_USER}>`,
+        await sendMail({
           to: user.email,
           subject: `📊 Votre résumé hebdomadaire — ${stats.messages} messages`,
           html: generateDigestHTML(user.nom || 'Utilisateur', stats),
@@ -103,7 +92,19 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ sent });
+    // La purge est rattachée au cron hebdomadaire : sans elle, `otp_codes`
+    // conserve indéfiniment les empreintes de tous les codes émis et
+    // `auth_events` grossit sans limite.
+    let purged = true;
+    try {
+      const { error } = await getSupabaseAdmin().rpc('purge_auth_artifacts');
+      if (error) throw new Error(error.message);
+    } catch (purgeError) {
+      purged = false;
+      console.error("[digest] Purge des artefacts d'authentification :", purgeError);
+    }
+
+    return NextResponse.json({ sent, purged });
   } catch (error) {
     console.error('[digest] Erreur:', error);
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });

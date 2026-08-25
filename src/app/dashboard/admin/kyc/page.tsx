@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
 import { toast } from '@/components/Toast';
 import { getKycSignedUrl, KYC_BUCKETS } from '@/lib/kycStorage';
+import { formatDate } from '@/lib/i18n';
 
 type KycEntry = {
   id: string;
@@ -252,12 +253,12 @@ export default function AdminKycPage() {
                         {estResoumis(kyc) ? (
                           <>
                             <span className="font-bold text-blue-600">
-                              Resoumis le {new Date(dateSoumission(kyc)).toLocaleDateString('fr-FR')}
+                              Resoumis le {formatDate(dateSoumission(kyc))}
                             </span>
-                            {' '}(dossier initial du {new Date(kyc.created_at).toLocaleDateString('fr-FR')})
+                            {' '}(dossier initial du {formatDate(kyc.created_at)})
                           </>
                         ) : (
-                          <>Soumis le {new Date(dateSoumission(kyc)).toLocaleDateString('fr-FR')}</>
+                          <>Soumis le {formatDate(dateSoumission(kyc))}</>
                         )}
                       </p>
                     </div>

@@ -1,25 +1,12 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import nodemailer from 'nodemailer';
 import { z } from 'zod';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { escapeHtml } from '@/lib/sanitize';
 import { getAuthenticatedUser } from '@/lib/auth';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
+import { sendMail } from '@/lib/mailer';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER!,
-    pass: process.env.SMTP_PASS!,
-  },
-});
 
 // L'URL publique du site — l'ancienne valeur dérivait de l'URL Supabase
 // (`.replace('.supabase.co', '')`) et produisait un lien invalide dans l'email.
@@ -41,7 +28,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
   }
 
-  const { data: callerProfile } = await supabaseAdmin
+  const { data: callerProfile } = await getSupabaseAdmin()
     .from('profils')
     .select('role')
     .eq('id', caller.id)
@@ -70,7 +57,7 @@ export async function POST(request: Request) {
 
   const { userId, statut, motif } = parsed.data;
 
-  const { data: profil } = await supabaseAdmin
+  const { data: profil } = await getSupabaseAdmin()
     .from('profils')
     .select('nom, email')
     .eq('id', userId)
@@ -86,7 +73,7 @@ export async function POST(request: Request) {
     : `Votre vérification d\'identité a été rejetée.${motif ? ` Motif : ${motif}` : ''} Veuillez soumettre un nouveau dossier.`;
 
   // 1) Insert in-app notification
-  await supabaseAdmin.from('notifications').insert({
+  await getSupabaseAdmin().from('notifications').insert({
     user_id: userId,
     type: 'kyc',
     title: notifTitle,
@@ -104,8 +91,7 @@ export async function POST(request: Request) {
       const icon = isRejected ? '❌' : '✅';
       const btnColor = isRejected ? '#dc2626' : '#16a34a';
 
-      await transporter.sendMail({
-        from: `"SecrétariatPro" <${process.env.SMTP_USER}>`,
+      await sendMail({
         to: profil.email,
         subject: `${notifTitle} - SecrétariatPro`,
         html: `<!DOCTYPE html>

@@ -1,54 +1,56 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import * as OTPAuth from 'otpauth';
 import QRCode from 'qrcode';
-import crypto from 'crypto';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 import { getAuthenticatedUser } from '@/lib/auth';
-import { z } from 'zod';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+export const runtime = 'nodejs';
 
-const setupSchema = z.object({
-  userId: z.string().uuid(),
-  method: z.enum(['totp', 'email']),
-});
-
+/**
+ * Démarre l'enrôlement d'une application d'authentification.
+ *
+ * La méthode « code par email » a été retirée : depuis le durcissement de la
+ * connexion, un code email est demandé à TOUS les comptes à chaque connexion.
+ * La proposer en option laissait croire à un réglage facultatif alors qu'elle
+ * décrivait le comportement par défaut, et son implémentation concaténait le
+ * code dans la colonne `secret` — deux appels successifs corrompaient la ligne.
+ *
+ * L'identité vient exclusivement de la session : l'ancienne version lisait
+ * l'identifiant dans le corps de la requête et l'adresse email dans un en-tête
+ * `x-user-email` fourni par le client.
+ */
 export async function POST(request: Request) {
-  const rateLimitResult = await checkRateLimit(`2fa-setup:${getClientIp(request)}`, 5, 60000);
-  if (!rateLimitResult.allowed) {
-    return NextResponse.json({ error: 'Trop de requêtes. Réessayez plus tard.' }, { status: 429 });
-  }
-
-  const body = await request.json();
-  const parsed = setupSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: 'Données invalides' }, { status: 400 });
-  }
-
-  const { userId, method } = parsed.data;
-
   const user = await getAuthenticatedUser();
-  if (!user || user.id !== userId) {
+  if (!user) {
     return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
   }
 
-  const { data: existing } = await supabaseAdmin
+  const rate = await checkRateLimit(`2fa-setup:${user.id}:${getClientIp(request)}`, 5, 60_000);
+  if (!rate.allowed) {
+    return NextResponse.json({ error: 'Trop de requêtes. Réessayez plus tard.' }, { status: 429 });
+  }
+
+  const supabase = getSupabaseAdmin();
+
+  const { data: existing } = await supabase
     .from('two_factor_auth')
     .select('enabled')
-    .eq('user_id', userId)
+    .eq('user_id', user.id)
     .maybeSingle();
 
   if (existing?.enabled) {
-    return NextResponse.json({ error: '2FA already enabled' }, { status: 400 });
+    return NextResponse.json(
+      { error: "L'application d'authentification est déjà activée sur ce compte." },
+      { status: 409 }
+    );
   }
 
   const totp = new OTPAuth.TOTP({
     issuer: 'SecretariatPro',
-    label: userId,
+    // Le libellé est ce qu'affiche l'application d'authentification : une
+    // adresse email est identifiable, contrairement à un UUID.
+    label: user.email ?? user.id,
     algorithm: 'SHA1',
     digits: 6,
     period: 30,
@@ -56,48 +58,23 @@ export async function POST(request: Request) {
 
   const secret = totp.secret.base32;
 
-  if (method === 'totp') {
-    const uri = totp.toString();
-    const qrData = await QRCode.toDataURL(uri);
-
-    await supabaseAdmin.from('two_factor_auth').upsert({
-      user_id: userId,
+  const { error } = await supabase.from('two_factor_auth').upsert(
+    {
+      user_id: user.id,
       secret,
       method: 'totp',
       enabled: false,
-    });
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id' }
+  );
 
-    return NextResponse.json({ qrData, method: 'totp' });
+  if (error) {
+    console.error('[2fa/setup]', error.message);
+    return NextResponse.json({ error: 'Enregistrement impossible.' }, { status: 500 });
   }
 
-  const code = String(crypto.randomInt(100000, 999999));
+  const qrData = await QRCode.toDataURL(totp.toString(), { margin: 1, width: 240 });
 
-  await supabaseAdmin.from('two_factor_auth').upsert({
-    user_id: userId,
-    secret: `${secret}:${code}`,
-    method: 'email',
-    enabled: false,
-  });
-
-  const nodemailer = (await import('nodemailer')).default;
-  const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    auth: { user: process.env.SMTP_USER!, pass: process.env.SMTP_PASS! },
-  });
-
-  await transporter.sendMail({
-    from: `"SecrétariatPro" <${process.env.SMTP_USER}>`,
-    to: request.headers.get('x-user-email') || '',
-    subject: 'Votre code de vérification - SecrétariatPro',
-    html: `<div style="font-family:sans-serif;text-align:center;padding:40px;">
-      <h2 style="color:#1e293b;">Code de vérification</h2>
-      <p style="color:#475569;">Voici votre code pour activer la 2FA :</p>
-      <div style="font-size:48px;font-weight:bold;letter-spacing:12px;color:#2563eb;margin:30px 0;">${code}</div>
-      <p style="color:#94a3b8;font-size:13px;">Ce code expire dans 10 minutes.</p>
-    </div>`,
-  });
-
-  return NextResponse.json({ method: 'email', message: 'Code envoyé par email' });
+  return NextResponse.json({ method: 'totp', qrData, secret });
 }

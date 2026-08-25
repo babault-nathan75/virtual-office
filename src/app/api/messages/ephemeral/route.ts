@@ -1,11 +1,7 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { checkRateLimit } from '@/lib/rateLimit';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 export async function POST(request: Request) {
   const authHeader = request.headers.get('authorization');
@@ -19,7 +15,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Trop de requêtes.' }, { status: 429 });
   }
 
-  const { error } = await supabaseAdmin
+  const { error } = await getSupabaseAdmin()
     .rpc('delete_expired_ephemeral_messages');
 
   if (error) {

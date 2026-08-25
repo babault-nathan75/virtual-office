@@ -1,13 +1,9 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { z } from 'zod';
 import { checkRateLimit } from '@/lib/rateLimit';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 const ensureProfileSchema = z.object({
   userId: z.string().uuid(),
@@ -52,7 +48,7 @@ export async function POST(request: Request) {
   // sinon n'importe qui pourrait revendiquer le profil d'un tiers.
   const email = user.email;
 
-  const { data: existing } = await supabaseAdmin
+  const { data: existing } = await getSupabaseAdmin()
     .from('profils')
     .select('id, role')
     .eq('id', userId)
@@ -63,7 +59,7 @@ export async function POST(request: Request) {
   }
 
   if (email) {
-    const { data: existingByEmail } = await supabaseAdmin
+    const { data: existingByEmail } = await getSupabaseAdmin()
       .from('profils')
       .select('id, role')
       .eq('email', email)
@@ -72,7 +68,7 @@ export async function POST(request: Request) {
     if (existingByEmail && existingByEmail.id !== userId) {
       // Profil orphelin créé avant que l'utilisateur ne dispose de cet id auth :
       // on le rattache sans jamais toucher au rôle déjà enregistré.
-      await supabaseAdmin
+      await getSupabaseAdmin()
         .from('profils')
         .update({ id: userId, nom: nom || 'Utilisateur' })
         .eq('id', existingByEmail.id);
@@ -87,7 +83,7 @@ export async function POST(request: Request) {
     insertData.email_confirmed = false;
   }
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await getSupabaseAdmin()
     .from('profils')
     .insert(insertData)
     .select('role')
@@ -95,7 +91,7 @@ export async function POST(request: Request) {
 
   if (error) {
     if (error.code === '23505') {
-      const { data: existingProf } = await supabaseAdmin
+      const { data: existingProf } = await getSupabaseAdmin()
         .from('profils')
         .select('role')
         .eq('id', userId)

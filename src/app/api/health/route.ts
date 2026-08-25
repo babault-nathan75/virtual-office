@@ -1,10 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | 'timeout'> {
   return Promise.race([promise, new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), ms))]);
@@ -16,7 +12,7 @@ export async function GET() {
   try {
     const dbResult = await withTimeout(
       (async () => {
-        const r = await supabaseAdmin.from('profils').select('id', { count: 'exact', head: true });
+        const r = await getSupabaseAdmin().from('profils').select('id', { count: 'exact', head: true });
         return r;
       })(),
       5000

@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* =============================================================================
+   Jetons de couleur
+   ========================================================================== */
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -26,7 +30,14 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  /* Évite le décalage horizontal du contenu quand une barre de défilement
+     apparaît puis disparaît au changement de page. */
+  scrollbar-gutter: stable;
 }
+
+/* =============================================================================
+   Champs de saisie et cibles tactiles
+   ========================================================================== */
 
 /*
  * iOS zoome automatiquement sur un champ dont la police fait moins de 16 px,
@@ -41,13 +52,27 @@ body {
   }
 }
 
-/* Cible tactile minimale recommandée (WCAG 2.5.5) sur les contrôles. */
+/*
+ * Cible tactile minimale recommandée (WCAG 2.5.5).
+ *
+ * Une seule règle, au lieu des deux blocs qui coexistaient auparavant : l'un
+ * sous `@media (pointer: coarse)`, l'autre sans condition. Le second imposait
+ * 44 px de haut à TOUS les boutons, y compris à la souris, ce qui déformait
+ * les petits boutons d'icône et contredisait la classe `min-h-[32px]` du
+ * bouton `size="sm"`.
+ */
 @media (pointer: coarse) {
   button,
   [role='button'],
   a[href],
   label[for],
-  summary {
+  summary,
+  input[type='submit'],
+  input[type='button'],
+  input[type='checkbox'],
+  input[type='radio'],
+  select,
+  textarea {
     min-height: 44px;
   }
 
@@ -59,7 +84,10 @@ body {
   }
 }
 
-/* Focus visible */
+/* =============================================================================
+   Accessibilité
+   ========================================================================== */
+
 *:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
@@ -67,9 +95,12 @@ body {
 }
 
 /*
- * Respect de « réduire les animations » du système : les transitions et
- * animations décoratives sont neutralisées, sans casser les défilements
- * programmés (`scroll-behavior` est remis à `auto`).
+ * Respect de « réduire les animations » du système.
+ *
+ * Bloc unique : la feuille en contenait deux identiques, dont le second
+ * neutralisait aussi `animate-spin`. Or un indicateur de chargement figé n'est
+ * plus un indicateur — on le conserve, simplement ralenti, ce que la
+ * recommandation WCAG 2.3.3 autorise pour un contenu non décoratif.
  */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -80,9 +111,22 @@ body {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+
+  .animate-pulse,
+  .animate-bounce {
+    animation: none !important;
+  }
+
+  .animate-spin {
+    animation-duration: 1.5s !important;
+    animation-iteration-count: infinite !important;
+  }
 }
 
-/* Animations */
+/* =============================================================================
+   Animations
+   ========================================================================== */
+
 .animate-in {
   animation: fadeInZoom 0.2s ease-out;
 }
@@ -108,20 +152,143 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Reduced motion */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-  .animate-pulse { animation: none !important; }
-  .animate-bounce { animation: none !important; }
-  .animate-spin { animation: none !important; }
+/*
+ * Transitions des contrôles.
+ *
+ * Liste explicite plutôt que `all` : animer `all` fait passer le compositeur
+ * sur des propriétés déclenchant un recalcul de mise en page (largeur,
+ * hauteur, marges) à chaque survol, ce qui se voit sur mobile.
+ */
+button,
+a {
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease,
+    transform 0.15s ease;
 }
 
-/* Scrollbar styling */
+.page-enter {
+  animation: pageEnter 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.stagger-children > * {
+  animation: fadeSlideIn 0.3s ease-out both;
+}
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 50ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 100ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 150ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 200ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 250ms; }
+
+.card-hover {
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+}
+
+.img-reveal {
+  animation: imgReveal 0.4s ease-out;
+}
+
+@keyframes imgReveal {
+  from { opacity: 0; filter: blur(4px); }
+  to   { opacity: 1; filter: blur(0); }
+}
+
+.toast-enter {
+  animation: toastSlideIn 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes toastSlideIn {
+  from { opacity: 0; transform: translateX(100%) scale(0.95); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+.mobile-menu-enter {
+  animation: mobileMenuSlide 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes mobileMenuSlide {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* =============================================================================
+   Effets et utilitaires
+   ========================================================================== */
+
+.ripple {
+  position: relative;
+  overflow: hidden;
+}
+.ripple::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 10%, transparent 10%);
+  transform: scale(10);
+  opacity: 0;
+  transition: transform 0.4s, opacity 0.8s;
+  pointer-events: none;
+}
+.ripple:active::after {
+  transform: scale(0);
+  opacity: 1;
+  transition: 0s;
+}
+
+.focus-ring {
+  transition: box-shadow 0.2s ease;
+}
+.focus-ring:focus-visible {
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3);
+}
+
+/* Ne rend que ce qui est visible : allège le premier affichage des longues
+   listes (discussions, profils). */
+.content-visibility-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
+}
+
+.safe-area-pb {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.scroll-snap-x {
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+.scroll-snap-x > * {
+  scroll-snap-align: start;
+}
+
+/* =============================================================================
+   Barre de défilement
+   ========================================================================== */
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -135,157 +302,4 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
-}
-
-/* Touch targets minimum 44px — only interactive controls, not all anchors */
-button, [role="button"], input[type="submit"], input[type="button"], input[type="checkbox"], input[type="radio"], input[type="range"], select, textarea {
-  min-height: 44px;
-}
-button, a {
-  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
-}
-
-/* Content visibility for CLS */
-.content-visibility-auto {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 200px;
-}
-
-/* Safe area for bottom nav on iOS */
-.safe-area-pb {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-}
-
-/* Ripple effect on buttons */
-.ripple {
-  position: relative;
-  overflow: hidden;
-}
-.ripple::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle, rgba(255,255,255,0.3) 10%, transparent 10%);
-  transform: scale(10);
-  opacity: 0;
-  transition: transform 0.4s, opacity 0.8s;
-  pointer-events: none;
-}
-.ripple:active::after {
-  transform: scale(0);
-  opacity: 1;
-  transition: 0s;
-}
-
-/* Smooth page transition wrapper */
-.page-enter {
-  animation: pageEnter 0.35s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-@keyframes pageEnter {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* Stagger children animation */
-.stagger-children > * {
-  animation: fadeSlideIn 0.3s ease-out both;
-}
-.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
-.stagger-children > *:nth-child(2) { animation-delay: 50ms; }
-.stagger-children > *:nth-child(3) { animation-delay: 100ms; }
-.stagger-children > *:nth-child(4) { animation-delay: 150ms; }
-.stagger-children > *:nth-child(5) { animation-delay: 200ms; }
-.stagger-children > *:nth-child(6) { animation-delay: 250ms; }
-
-/* Interactive card hover */
-.card-hover {
-  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s ease;
-}
-.card-hover:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
-}
-
-/* Smooth image loading */
-.img-reveal {
-  animation: imgReveal 0.4s ease-out;
-}
-
-@keyframes imgReveal {
-  from {
-    opacity: 0;
-    filter: blur(4px);
-  }
-  to {
-    opacity: 1;
-    filter: blur(0);
-  }
-}
-
-/* Toast slide in from right */
-.toast-enter {
-  animation: toastSlideIn 0.3s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-@keyframes toastSlideIn {
-  from {
-    opacity: 0;
-    transform: translateX(100%) scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-  }
-}
-
-/* Mobile menu slide */
-.mobile-menu-enter {
-  animation: mobileMenuSlide 0.25s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-@keyframes mobileMenuSlide {
-  from {
-    opacity: 0;
-    transform: translateY(-8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* Skeleton shimmer refinement */
-.skeleton-shimmer {
-  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-}
-
-@keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
-/* Focus ring animation */
-.focus-ring {
-  transition: box-shadow 0.2s ease;
-}
-.focus-ring:focus-visible {
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3);
-}
-
-/* Scroll snap for horizontal lists */
-.scroll-snap-x {
-  scroll-snap-type: x mandatory;
-  -webkit-overflow-scrolling: touch;
-}
-.scroll-snap-x > * {
-  scroll-snap-align: start;
 }

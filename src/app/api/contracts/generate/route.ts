@@ -3,6 +3,7 @@ import { escapeHtml } from '@/lib/sanitize';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { z } from 'zod';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
+import { formatDateLong } from '@/lib/i18n';
 
 const contractSchema = z.object({
   entrepriseNom: z.string().min(1).max(200),
@@ -136,7 +137,7 @@ function generateContractHTML(data: ContractData): string {
   </div>
 
   <div class="footer">
-    <p>Document généré par SecrétariatPro — ${new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+    <p>Document généré par SecrétariatPro — ${formatDateLong(Date.now())}</p>
     <p>Ce contrat est généré automatiquement. Les parties peuvent y apposer leur signature manuscrite ou électronique.</p>
   </div>
 </body>

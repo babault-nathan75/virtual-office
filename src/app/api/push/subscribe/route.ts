@@ -1,13 +1,9 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { z } from 'zod';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 const subscribeSchema = z.object({
   userId: z.string().uuid(),
@@ -35,7 +31,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
   }
 
-  const { error } = await supabaseAdmin
+  const { error } = await getSupabaseAdmin()
     .from('push_subscriptions')
     .upsert({
       user_id: userId,

@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { rateLimit } from '@/lib/rateLimit';
 import { getAuthenticatedUser } from '@/lib/auth';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? '');
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL ?? '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
-);
 
 const MissionSchema = z.object({
   id: z.number(),
@@ -54,7 +50,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Récupérer le profil de la secrétaire
-    const { data: profil } = await supabaseAdmin
+    const { data: profil } = await getSupabaseAdmin()
       .from('profils_secretaires')
       .select('bio, competences, outils, soft_skills, langues, ville, disponibilite, niveau_etudes, specialite, annees_experience')
       .eq('id', secretaireId)

@@ -1,14 +1,10 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import webPush from 'web-push';
 import { requireAuth } from '@/lib/auth';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 import { z } from 'zod';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
   webPush.setVapidDetails(
@@ -57,14 +53,14 @@ export async function POST(request: Request) {
   // URL libres) vers n'importe quel autre compte. L'envoi est désormais limité
   // à soi-même, aux administrateurs, et aux correspondants déjà en contact.
   if (userId !== user.id) {
-    const { data: callerProfile } = await supabaseAdmin
+    const { data: callerProfile } = await getSupabaseAdmin()
       .from('profils')
       .select('role')
       .eq('id', user.id)
       .maybeSingle();
 
     if (callerProfile?.role !== 'admin') {
-      const { count } = await supabaseAdmin
+      const { count } = await getSupabaseAdmin()
         .from('messages')
         .select('id', { count: 'exact', head: true })
         .or(
@@ -86,7 +82,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Push non configuré' }, { status: 503 });
   }
 
-  const { data: subs } = await supabaseAdmin
+  const { data: subs } = await getSupabaseAdmin()
     .from('push_subscriptions')
     .select('endpoint, p256dh, auth')
     .eq('user_id', userId);
@@ -108,7 +104,7 @@ export async function POST(request: Request) {
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       if (errMsg.includes('410') || errMsg.includes('404')) {
-        await supabaseAdmin
+        await getSupabaseAdmin()
           .from('push_subscriptions')
           .delete()
           .eq('endpoint', sub.endpoint);

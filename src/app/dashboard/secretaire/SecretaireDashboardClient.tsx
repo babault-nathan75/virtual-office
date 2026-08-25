@@ -6,6 +6,7 @@ import Link from '@/components/Link';
 import { toast } from '@/components/Toast';
 import KycStatusBanner from '@/components/KycStatusBanner';
 import { postulerAction } from '@/lib/data/secretaire-client';
+import { LOCALE } from '@/lib/i18n';
 
 type Mission = {
   id: number;
@@ -102,7 +103,7 @@ export default function SecretaireDashboardClient({
 
   const formatDate = (dateString: string) => {
     if (!dateString) return 'Date à définir';
-    return new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(dateString));
+    return new Intl.DateTimeFormat(LOCALE, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(dateString));
   };
 
   const OFFRE_STATUT_LABEL: Record<string, { label: string; color: string; dot: string }> = {

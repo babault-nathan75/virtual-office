@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { checkRateLimit } from '@/lib/rateLimit';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 
 /**
  * Fiche détaillée d'une secrétaire, consultée depuis la modale « Voir le
@@ -12,11 +12,6 @@ import { checkRateLimit } from '@/lib/rateLimit';
  * échouait systématiquement sur « Erreur chargement profil ».
  */
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
 
 const paramsSchema = z.object({ id: z.string().uuid() });
 
@@ -42,7 +37,7 @@ export async function GET(
 
   // Seules les entreprises et les administrateurs consultent ces fiches ;
   // une secrétaire peut consulter la sienne.
-  const { data: callerProfile } = await supabaseAdmin
+  const { data: callerProfile } = await getSupabaseAdmin()
     .from('profils')
     .select('role')
     .eq('id', user.id)
@@ -54,7 +49,7 @@ export async function GET(
     return NextResponse.json({ error: 'Accès refusé' }, { status: 403 });
   }
 
-  const { data: cible } = await supabaseAdmin
+  const { data: cible } = await getSupabaseAdmin()
     .from('profils')
     .select('id, nom, role')
     .eq('id', secretaireId)
@@ -67,7 +62,7 @@ export async function GET(
   // Un profil non vérifié n'est pas exposé aux entreprises : c'est la règle
   // annoncée aux secrétaires lors de la soumission du KYC.
   if (!isSelf && role !== 'admin') {
-    const { data: kyc } = await supabaseAdmin
+    const { data: kyc } = await getSupabaseAdmin()
       .from('kyc_verifications')
       .select('statut')
       .eq('user_id', secretaireId)
@@ -80,7 +75,7 @@ export async function GET(
 
   // Chaîne littérale (et non concaténée) : le client Supabase en dérive le
   // type du résultat, ce qu'une concaténation lui interdit.
-  const { data: profil, error } = await supabaseAdmin
+  const { data: profil, error } = await getSupabaseAdmin()
     .from('profils_secretaires')
     .select('id, photo_url, bio, ville, disponibilite, niveau_etudes, specialite, langues, outils, soft_skills, competences, annees_experience')
     .eq('id', secretaireId)

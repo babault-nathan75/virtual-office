@@ -18,6 +18,7 @@ import { EmptyState } from '@/components/ui';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { supabase } from '@/lib/supabaseClient';
+import { LOCALE } from '@/lib/i18n';
 
 type UserRole = 'entreprise' | 'secretaire' | 'admin';
 
@@ -121,7 +122,7 @@ function getRoleLabel(role: UserRole): string {
 }
 
 function formatMessageTime(date: string): string {
-  return new Intl.DateTimeFormat('fr-FR', {
+  return new Intl.DateTimeFormat(LOCALE, {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(date));
@@ -141,7 +142,7 @@ function formatDayLabel(date: string): string {
   if (sameDay(messageDate, today)) return "Aujourd'hui";
   if (sameDay(messageDate, yesterday)) return 'Hier';
 
-  return new Intl.DateTimeFormat('fr-FR', {
+  return new Intl.DateTimeFormat(LOCALE, {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
@@ -191,14 +192,14 @@ export default function MessagesPage() {
   );
 
   const filteredContacts = useMemo(() => {
-    const query = contactSearch.trim().toLocaleLowerCase('fr-FR');
+    const query = contactSearch.trim().toLocaleLowerCase(LOCALE);
 
     if (!query) return contacts;
 
     return contacts.filter((contact) => {
       const searchable = [contact.nom, getRoleLabel(contact.role)]
         .join(' ')
-        .toLocaleLowerCase('fr-FR');
+        .toLocaleLowerCase(LOCALE);
 
       return searchable.includes(query);
     });

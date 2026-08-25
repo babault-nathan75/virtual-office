@@ -2,14 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { isRole, roleHomePath, type Role } from '@/lib/roles';
 
-export type Role = 'entreprise' | 'secretaire' | 'admin';
+// Réexportés pour ne pas casser les imports existants ; la définition vit
+// désormais dans `@/lib/roles`, utilisable aussi depuis le serveur.
+export { isRole, type Role };
 
 const ROLE_KEY = 'sp:cached-role';
-
-function isRole(value: unknown): value is Role {
-  return value === 'entreprise' || value === 'secretaire' || value === 'admin';
-}
 
 /**
  * Le cache est indexé par identifiant utilisateur : sans cela, une seconde
@@ -50,9 +49,7 @@ export function clearCachedRole() {
 }
 
 export function roleHome(role: Role): string {
-  if (role === 'admin') return '/dashboard/admin';
-  if (role === 'secretaire') return '/dashboard/secretaire';
-  return '/dashboard/entreprise';
+  return roleHomePath(role);
 }
 
 export function useRole(): Role | null {

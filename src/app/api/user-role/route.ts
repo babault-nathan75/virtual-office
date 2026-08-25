@@ -1,6 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
-import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 
 export async function GET(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -34,12 +34,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ role: null }, { status: 401 });
   }
 
-  const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-
-  const { data: profil } = await supabaseAdmin
+  
+  const { data: profil } = await getSupabaseAdmin()
     .from('profils')
     .select('role')
     .eq('id', user.id)

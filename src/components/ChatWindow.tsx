@@ -8,419 +8,63 @@ import {
   useState,
   type ChangeEvent,
   type DragEvent,
-  type ReactNode,
 } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "@/components/Toast";
-import { SkeletonChat } from "@/components/Skeleton";
 import { isFeatureEnabled } from "@/lib/features";
 import { useSwipeActions } from "@/hooks/useSwipeActions";
-import lamejs from "lamejs";
+import { LOCALE } from '@/lib/i18n';
+import type { ChatWindowProps, ConfirmAction, ContactOption, Conversation, Message, MessageAttachment, Profile, SearchHit } from '@/components/chat/types';
+import { CHAT_FILES_BUCKET, EPHEMERAL_OPTIONS, MAX_MESSAGE_LENGTH, MAX_UPLOAD_SIZE, PAGE_SIZE } from '@/components/chat/constants';
+import {
+  audioFileExtension,
+  chatFilePathFromUrl,
+  convertBlobToMp3,
+  fileNameFromUrl,
+  formatConversationDate,
+  formatDayLabel,
+  isMissingColumnError,
+  isOptimistic,
+  isSameDay,
+  makeOptimisticId,
+  messagePreview,
+  preferredRecordingMimeType,
+  resolveMessageAttachment,
+  roleDotClass,
+  roleLabel,
+  rolePillClass,
+  safeHttpUrl,
+  visibleMessageText,
+} from '@/components/chat/helpers';
+import { ChatAvatar, ChatLoadError, ChatWindowSkeleton, ComposerTool, DaySeparator, MessageAction, MessageListSkeleton, ProfileField } from '@/components/chat/atoms';
+import {
+  AlertTriangleIcon,
+  ArchiveIcon,
+  BackIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  ClockIcon,
+  CloseIcon,
+  CopyIcon,
+  DocumentIcon,
+  DownloadIcon,
+  EditIcon,
+  MessageIcon,
+  MicIcon,
+  MoreIcon,
+  PaperclipIcon,
+  PlusIcon,
+  ProfileIcon,
+  ReplyIcon,
+  SearchIcon,
+  SendIcon,
+  ShieldIcon,
+  SpinnerIcon,
+  StopIcon,
+  UnlockIcon,
+} from '@/components/chat/icons';
 
-type Message = {
-  // UUID côté base, et non un entier : les identifiants de messages ne se
-  // comparent ni ne s'incrémentent.
-  id: string;
-  sender_id: string;
-  receiver_id: string;
-  content: string;
-  read: boolean;
-  read_at: string | null;
-  closed: boolean;
-  closed_by: string | null;
-  closed_at: string | null;
-  ephemeral: boolean;
-  expires_at: string | null;
-  created_at: string;
-  // Message cité (migration 006). Optionnel : les bases antérieures à cette
-  // migration renvoient simplement la colonne absente.
-  reply_to?: string | null;
-};
-
-/*
- * Les messages en cours d'envoi reçoivent un identifiant local préfixé, seul
- * moyen de les distinguer des messages persistés maintenant que les vrais
- * identifiants sont des UUID. L'ancien procédé — un entier négatif comparé par
- * `id < 0` — reposait sur la coercition d'un UUID en NaN.
- */
-const OPTIMISTIC_PREFIX = 'optimistic-';
-
-function makeOptimisticId() {
-  return `${OPTIMISTIC_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function isOptimistic(id: string) {
-  return id.startsWith(OPTIMISTIC_PREFIX);
-}
-
-type Conversation = {
-  otherId: string;
-  otherNom: string;
-  otherRole: string;
-  lastMessage: string;
-  lastDate: string;
-  unread: number;
-  closed: boolean;
-  closedBy: string | null;
-};
-
-type Profile = {
-  id: string;
-  nom: string;
-  role: string;
-  email?: string;
-  telephone?: string;
-};
-
-type SearchHit = {
-  id: string;
-  sender_id: string;
-  content: string;
-  created_at: string;
-};
-
-type ContactOption = {
-  id: string;
-  nom: string;
-  role: string;
-  email?: string;
-};
-
-type MessageAttachment = {
-  url: string;
-  type: string;
-  name: string;
-  legacy: boolean;
-};
-
-type Props = {
-  currentUserId: string;
-  currentRole: "entreprise" | "secretaire" | "admin";
-  /** @deprecated Conservé pour compatibilité ; les administrateurs sont désormais chargés depuis profils. */
-  adminId?: string;
-};
-
-type ConfirmAction =
-  | { kind: "closeConversation"; otherId: string };
-
-const PAGE_SIZE = 30;
-const EPHEMERAL_OPTIONS = [
-  { label: "5 min", ms: 5 * 60 * 1000 },
-  { label: "1 h", ms: 60 * 60 * 1000 },
-  { label: "24 h", ms: 24 * 60 * 60 * 1000 },
-];
-
-const MAX_MESSAGE_LENGTH = 2000;
-const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
-const CHAT_FILES_BUCKET = "chat-files";
-const RECORDING_MIME_TYPES = [
-  "audio/mp4;codecs=mp4a.40.2",
-  "audio/mp4",
-  "audio/webm;codecs=opus",
-  "audio/ogg;codecs=opus",
-  "audio/webm",
-  "audio/ogg",
-] as const;
-
-function roleLabel(role: string) {
-  if (role === "admin") return "Administration";
-  if (role === "entreprise") return "Entreprise";
-  return "Secrétaire";
-}
-
-function roleDotClass(role: string) {
-  if (role === "admin") return "bg-amber-500";
-  if (role === "entreprise") return "bg-emerald-500";
-  return "bg-blue-500";
-}
-
-function rolePillClass(role: string) {
-  if (role === "admin") return "bg-amber-50 text-amber-700 ring-amber-200";
-  if (role === "entreprise")
-    return "bg-emerald-50 text-emerald-700 ring-emerald-200";
-  return "bg-blue-50 text-blue-700 ring-blue-200";
-}
-
-function getInitials(name: string) {
-  return (
-    name
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part.charAt(0))
-      .join("") || "?"
-  );
-}
-
-function safeHttpUrl(value?: string | null) {
-  if (!value) return null;
-
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "https:" || parsed.protocol === "http:"
-      ? parsed.toString()
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function fileNameFromUrl(url: string) {
-  try {
-    const pathname = new URL(url).pathname;
-    const lastSegment = pathname.split("/").filter(Boolean).pop();
-    return lastSegment ? decodeURIComponent(lastSegment) : "Fichier";
-  } catch {
-    return "Fichier";
-  }
-}
-
-function inferFileType(url: string, fallback?: string | null) {
-  if (fallback) return fallback;
-
-  const extension = fileNameFromUrl(url).split(".").pop()?.toLowerCase();
-  const mimeTypes: Record<string, string> = {
-    webm: "audio/webm",
-    mp3: "audio/mpeg",
-    wav: "audio/wav",
-    ogg: "audio/ogg",
-    m4a: "audio/mp4",
-    mp4: "video/mp4",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    png: "image/png",
-    gif: "image/gif",
-    webp: "image/webp",
-    avif: "image/avif",
-    pdf: "application/pdf",
-    doc: "application/msword",
-    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    xls: "application/vnd.ms-excel",
-    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    csv: "text/csv",
-    txt: "text/plain",
-  };
-
-  return extension
-    ? mimeTypes[extension] || "application/octet-stream"
-    : "application/octet-stream";
-}
-
-function preferredRecordingMimeType() {
-  if (typeof MediaRecorder === "undefined") return "";
-
-  return (
-    RECORDING_MIME_TYPES.find((mimeType) =>
-      MediaRecorder.isTypeSupported(mimeType),
-    ) || ""
-  );
-}
-
-function audioFileExtension(mimeType: string) {
-  const normalizedType = mimeType.toLowerCase();
-  if (normalizedType.includes("mp4") || normalizedType.includes("aac")) {
-    return "m4a";
-  }
-  if (normalizedType.includes("ogg")) return "ogg";
-  if (normalizedType.includes("mpeg")) return "mp3";
-  if (normalizedType.includes("wav")) return "wav";
-  return "webm";
-}
-
-async function convertBlobToMp3(blob: Blob): Promise<Blob> {
-  const ctx = new OfflineAudioContext(1, 1, 44100);
-  const arrayBuffer = await blob.arrayBuffer();
-  const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-
-  const channels = audioBuffer.numberOfChannels;
-  const sampleRate = audioBuffer.sampleRate;
-  const length = audioBuffer.length;
-  const mp3Encoder = new lamejs.Mp3Encoder(channels, sampleRate, 192);
-
-  const samplesPerChunk = 1152;
-  const mp3Chunks: Int8Array[] = [];
-
-  for (let i = 0; i < length; i += samplesPerChunk) {
-    const end = Math.min(i + samplesPerChunk, length);
-
-    if (channels === 2) {
-      const left = new Int16Array(end - i);
-      const right = new Int16Array(end - i);
-      const leftFloat = audioBuffer.getChannelData(0);
-      const rightFloat = audioBuffer.getChannelData(1);
-      for (let j = 0; j < end - i; j++) {
-        left[j] = Math.max(-32768, Math.min(32767, leftFloat[i + j] * 32768));
-        right[j] = Math.max(-32768, Math.min(32767, rightFloat[i + j] * 32768));
-      }
-      const encoded = mp3Encoder.encodeBuffer(left, right);
-      if (encoded.length > 0) mp3Chunks.push(encoded);
-    } else {
-      const mono = new Int16Array(end - i);
-      const monoFloat = audioBuffer.getChannelData(0);
-      for (let j = 0; j < end - i; j++) {
-        mono[j] = Math.max(-32768, Math.min(32767, monoFloat[i + j] * 32768));
-      }
-      const encoded = mp3Encoder.encodeBuffer(mono);
-      if (encoded.length > 0) mp3Chunks.push(encoded);
-    }
-  }
-
-  const tail = mp3Encoder.flush();
-  if (tail.length > 0) mp3Chunks.push(tail);
-
-  const combined = new Uint8Array(mp3Chunks.reduce((sum, c) => sum + c.length, 0));
-  let offset = 0;
-  for (const chunk of mp3Chunks) {
-    combined.set(new Uint8Array(chunk.buffer), offset);
-    offset += chunk.length;
-  }
-
-  return new Blob([combined], { type: "audio/mpeg" });
-}
-
-function chatFilePathFromUrl(url: string) {
-  try {
-    const pathname = new URL(url).pathname;
-    const marker = `/${CHAT_FILES_BUCKET}/`;
-    const storagePrefix = "/storage/v1/object/";
-    const prefixIndex = pathname.indexOf(storagePrefix);
-    const bucketIndex = pathname.indexOf(marker, prefixIndex);
-
-    if (prefixIndex === -1 || bucketIndex === -1) return null;
-
-    const encodedPath = pathname.slice(bucketIndex + marker.length);
-    return encodedPath ? decodeURIComponent(encodedPath) : null;
-  } catch {
-    return null;
-  }
-}
-
-function parseLegacyAttachment(content: string): MessageAttachment | null {
-  const match = content.trim().match(/^(.*?)\s+[—–-]\s+(https?:\/\/\S+)\s*$/i);
-
-  if (!match) return null;
-
-  const url = safeHttpUrl(match[2]);
-  if (!url) return null;
-
-  const label = match[1].trim().replace(/^📎\s*/, "");
-  const inferredType = inferFileType(url);
-  const isVoice =
-    inferredType.startsWith("audio/") || /message\s+vocal/i.test(label);
-
-  return {
-    url,
-    type:
-      isVoice && !inferredType.startsWith("audio/")
-        ? "audio/webm"
-        : inferredType,
-    name: isVoice ? "Message vocal" : label || fileNameFromUrl(url),
-    legacy: true,
-  };
-}
-
-/**
- * Détecte une erreur PostgREST « colonne inconnue », afin de dégrader
- * proprement lorsqu'une migration n'a pas encore été appliquée en base.
- */
-function isMissingColumnError(error: unknown, column: string) {
-  if (!error || typeof error !== "object") return false;
-  const candidate = error as { code?: string; message?: string };
-  const message = candidate.message?.toLowerCase() || "";
-  return (
-    (candidate.code === "PGRST204" || candidate.code === "42703") &&
-    message.includes(column)
-  );
-}
-
-function resolveMessageAttachment(
-  message: { content: string },
-): MessageAttachment | null {
-  return parseLegacyAttachment(message.content);
-}
-
-function visibleMessageText(
-  message: { content: string },
-  attachment = resolveMessageAttachment(message),
-) {
-  const content = message.content.trim();
-  if (!attachment) return content;
-  if (parseLegacyAttachment(content)) return "";
-
-  const isDefaultVoiceLabel = /^🎤?\s*message\s+vocal$/i.test(content);
-  const isDefaultFileLabel =
-    content === attachment.name;
-
-  return isDefaultVoiceLabel || isDefaultFileLabel ? "" : content;
-}
-
-function messagePreview(message: { content: string }) {
-  const attachment = resolveMessageAttachment(message);
-  if (!attachment) return message.content;
-  if (attachment.type.startsWith("audio/")) return "🎤 Message vocal";
-  if (attachment.type.startsWith("image/")) return `🖼️ ${attachment.name}`;
-  return `📎 ${attachment.name}`;
-}
-
-function formatConversationDate(value: string) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-
-  const now = new Date();
-  const isToday =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate();
-
-  if (isToday) {
-    return date.toLocaleTimeString("fr-FR", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  const isYesterday =
-    date.getFullYear() === yesterday.getFullYear() &&
-    date.getMonth() === yesterday.getMonth() &&
-    date.getDate() === yesterday.getDate();
-
-  if (isYesterday) return "Hier";
-
-  return date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
-}
-
-function isSameDay(first: string, second: string) {
-  const a = new Date(first);
-  const b = new Date(second);
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
-}
-
-function formatDayLabel(value: string) {
-  const date = new Date(value);
-  const now = new Date();
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-
-  if (isSameDay(value, now.toISOString())) return "Aujourd'hui";
-  if (isSameDay(value, yesterday.toISOString())) return "Hier";
-
-  return date.toLocaleDateString("fr-FR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
-  });
-}
-
-export default function ChatWindow({ currentUserId, currentRole }: Props) {
+export default function ChatWindow({ currentUserId, currentRole }: ChatWindowProps) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -1956,7 +1600,7 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
   };
 
   const visibleConversations = useMemo(() => {
-    const query = conversationSearch.trim().toLocaleLowerCase("fr-FR");
+    const query = conversationSearch.trim().toLocaleLowerCase(LOCALE);
 
     return conversations.filter((conv) => {
       if (!showClosed && conv.closed) return false;
@@ -1964,7 +1608,7 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
 
       return [conv.otherNom, roleLabel(conv.otherRole), conv.lastMessage]
         .join(" ")
-        .toLocaleLowerCase("fr-FR")
+        .toLocaleLowerCase(LOCALE)
         .includes(query);
     });
   }, [conversationSearch, conversations, showClosed]);
@@ -1977,12 +1621,12 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
   const typingText = Array.from(typingUsers.values()).join(", ");
 
   const filteredMessages = useMemo(() => {
-    const query = msgSearch.trim().toLocaleLowerCase("fr-FR");
+    const query = msgSearch.trim().toLocaleLowerCase(LOCALE);
     if (!query) return messages;
 
     return messages.filter(
       (message) =>
-        message.content.toLocaleLowerCase("fr-FR").includes(query),
+        message.content.toLocaleLowerCase(LOCALE).includes(query),
     );
   }, [messages, msgSearch]);
 
@@ -2643,7 +2287,7 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
                           {messagePreview({ content: result.content })}
                         </p>
                         <p className="mt-1 text-[10px] text-slate-400">
-                          {new Date(result.created_at).toLocaleString("fr-FR")}
+                          {new Date(result.created_at).toLocaleString(LOCALE)}
                         </p>
                       </button>
                     ))}
@@ -3064,7 +2708,7 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
                                 <span>
                                   {new Date(
                                     message.created_at,
-                                  ).toLocaleTimeString("fr-FR", {
+                                  ).toLocaleTimeString(LOCALE, {
                                     hour: "2-digit",
                                     minute: "2-digit",
                                   })}
@@ -3541,505 +3185,3 @@ export default function ChatWindow({ currentUserId, currentRole }: Props) {
     </div>
   );
 }
-
-function ChatLoadError({ onRetry }: { onRetry: () => void }) {
-  return (
-    <div className="flex h-full min-h-[560px] w-full items-center justify-center rounded-[28px] border border-slate-200 bg-white px-6 text-center shadow-sm">
-      <div className="max-w-sm">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-rose-50 text-rose-600">
-          <AlertTriangleIcon />
-        </div>
-        <h3 className="mt-4 text-lg font-black tracking-tight text-slate-950">
-          La messagerie est indisponible
-        </h3>
-        <p className="mt-2 text-sm leading-6 text-slate-500">
-          Vérifiez votre connexion, puis réessayez. Aucun message n&apos;a été
-          perdu.
-        </p>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-5 inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-        >
-          <RefreshIcon />
-          Réessayer
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function MessageListSkeleton() {
-  return (
-    <div
-      className="mx-auto flex w-full max-w-4xl flex-col gap-4 py-3"
-      aria-label="Chargement des messages"
-    >
-      {[42, 64, 48, 72, 38].map((width, index) => (
-        <div
-          key={`${width}-${index}`}
-          className={`flex ${index % 2 === 0 ? "justify-start" : "justify-end"}`}
-        >
-          <div
-            className="h-14 animate-pulse rounded-[20px] bg-slate-100"
-            style={{ width: `${width}%` }}
-          />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ChatWindowSkeleton() {
-  return (
-    <div className="flex h-full min-h-[560px] w-full overflow-hidden bg-white md:rounded-[28px] md:border md:border-slate-200/80 md:shadow-[0_24px_70px_rgba(15,23,42,0.08)]">
-      <div className="w-full shrink-0 border-r border-slate-200 bg-slate-50/60 p-4 md:w-[360px]">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="h-4 w-28 animate-pulse rounded bg-slate-200" />
-            <div className="mt-2 h-3 w-20 animate-pulse rounded bg-slate-100" />
-          </div>
-          <div className="h-10 w-24 animate-pulse rounded-xl bg-slate-200" />
-        </div>
-        <div className="mt-4 h-10 animate-pulse rounded-xl bg-slate-200/80" />
-        <div className="mt-4 space-y-2">
-          {Array.from({ length: 6 }).map((_, index) => (
-            <div
-              key={index}
-              className="flex items-center gap-3 rounded-2xl bg-white/70 p-3"
-            >
-              <div className="h-11 w-11 animate-pulse rounded-full bg-slate-200" />
-              <div className="min-w-0 flex-1">
-                <div className="h-3 w-2/5 animate-pulse rounded bg-slate-200" />
-                <div className="mt-2 h-3 w-4/5 animate-pulse rounded bg-slate-100" />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="hidden flex-1 items-center justify-center p-6 md:flex">
-        <SkeletonChat />
-      </div>
-    </div>
-  );
-}
-
-function ChatAvatar({
-  name,
-  role,
-  src,
-  size = "md",
-}: {
-  name: string;
-  role: string;
-  src?: string | null;
-  size?: "xs" | "sm" | "md" | "xl";
-}) {
-  const sizes = {
-    xs: "h-8 w-8 text-[11px]",
-    sm: "h-10 w-10 text-xs",
-    md: "h-11 w-11 text-sm",
-    xl: "h-20 w-20 text-xl",
-  };
-
-  const palette =
-    role === "admin"
-      ? "bg-gradient-to-br from-amber-100 to-orange-100 text-amber-800"
-      : role === "entreprise"
-        ? "bg-gradient-to-br from-emerald-100 to-teal-100 text-emerald-800"
-        : "bg-gradient-to-br from-blue-100 to-indigo-100 text-blue-800";
-
-  if (src) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={src}
-        alt={name}
-        className={`${sizes[size]} rounded-full object-cover ring-1 ring-black/5`}
-      />
-    );
-  }
-
-  return (
-    <span
-      className={`${sizes[size]} ${palette} grid shrink-0 select-none place-items-center rounded-full font-black uppercase tracking-tight ring-1 ring-black/5`}
-      aria-label={name}
-    >
-      {getInitials(name)}
-    </span>
-  );
-}
-
-function DaySeparator({ label }: { label: string }) {
-  return (
-    <div className="my-5 flex items-center gap-3">
-      <span className="h-px flex-1 bg-slate-100" />
-      <span className="rounded-full border px-3 py-1 text-[9px] font-bold uppercase tracking-[0.08em] border-slate-200 bg-white text-slate-400">
-        {label}
-      </span>
-      <span className="h-px flex-1 bg-slate-100" />
-    </div>
-  );
-}
-
-function ProfileField({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border p-3.5 border-slate-200 bg-slate-50/70">
-      <p className="text-[9px] font-black uppercase tracking-[0.14em] text-slate-400">
-        {label}
-      </p>
-      <p className="mt-1 break-words text-sm font-semibold text-slate-800">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function MessageAction({
-  title,
-  onClick,
-  danger = false,
-  children,
-}: {
-  title: string;
-  onClick: () => void;
-  danger?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`grid h-7 w-7 place-items-center rounded-lg transition ${
-        danger
-          ? "text-rose-500 hover:bg-rose-50"
-          : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
-      }`}
-      title={title}
-      aria-label={title}
-    >
-      {children}
-    </button>
-  );
-}
-
-function ComposerTool({
-  title,
-  onClick,
-  active,
-  danger = false,
-  disabled = false,
-  children,
-}: {
-  title: string;
-  onClick: () => void;
-  active: boolean;
-  danger?: boolean;
-  disabled?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl transition disabled:cursor-wait disabled:opacity-60 ${
-        danger
-          ? "bg-rose-50 text-rose-600"
-          : active
-            ? "bg-purple-50 text-purple-700"
-            : "text-slate-500 hover:bg-white hover:text-slate-700"
-      }`}
-      title={title}
-      aria-label={title}
-    >
-      {children}
-    </button>
-  );
-}
-
-type IconProps = { large?: boolean };
-
-function Icon({
-  children,
-  large = false,
-}: IconProps & { children: ReactNode }) {
-  return (
-    <svg
-      className={large ? "h-8 w-8" : "h-4 w-4"}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={1.9}
-      aria-hidden="true"
-    >
-      {children}
-    </svg>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <Icon>
-      <circle cx="11" cy="11" r="7" />
-      <path strokeLinecap="round" d="m20 20-3.5-3.5" />
-    </Icon>
-  );
-}
-
-function PlusIcon() {
-  return (
-    <Icon>
-      <path strokeLinecap="round" d="M12 5v14M5 12h14" />
-    </Icon>
-  );
-}
-
-function MessageIcon({ large = false }: IconProps) {
-  return (
-    <Icon large={large}>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M21 12a8 8 0 0 1-8 8H7l-4 2 1.4-4A8 8 0 1 1 21 12Z"
-      />
-      <path strokeLinecap="round" d="M8 10h8M8 14h5" />
-    </Icon>
-  );
-}
-
-function ArchiveIcon() {
-  return (
-    <Icon>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M4 7h16M6 7v12h12V7M9 11h6"
-      />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M5 4h14l1 3H4l1-3Z"
-      />
-    </Icon>
-  );
-}
-
-function ShieldIcon() {
-  return (
-    <Icon>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M12 3 19 6v5c0 4.6-2.8 8.1-7 10-4.2-1.9-7-5.4-7-10V6l7-3Z"
-      />
-      <path strokeLinecap="round" strokeLinejoin="round" d="m9 12 2 2 4-4" />
-    </Icon>
-  );
-}
-
-function AlertTriangleIcon() {
-  return (
-    <Icon>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M12 4 21 20H3L12 4Z"
-      />
-      <path strokeLinecap="round" d="M12 9v5M12 17.5h.01" />
-    </Icon>
-  );
-}
-
-function RefreshIcon() {
-  return (
-    <Icon>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M20 7v5h-5M4 17v-5h5"
-      />
-      <path
-        strokeLinecap="round"
-        d="M18.2 10A7 7 0 0 0 6.1 7.4L4 10M5.8 14A7 7 0 0 0 17.9 16.6L20 14"
-      />
-    </Icon>
-  );
-}
-
-function ProfileIcon() {
-  return (
-    <Icon>
-      <circle cx="12" cy="8" r="3" />
-      <path strokeLinecap="round" d="M5.5 19c.8-3.4 3-5 6.5-5s5.7 1.6 6.5 5" />
-    </Icon>
-  );
-}
-
-function MoreIcon() {
-  return (
-    <Icon>
-      <circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" />
-      <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
-      <circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" />
-    </Icon>
-  );
-}
-
-function DownloadIcon() {
-  return (
-    <Icon>
-      <path strokeLinecap="round" d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14" />
-    </Icon>
-  );
-}
-
-function DocumentIcon() {
-  return (
-    <Icon>
-      <path strokeLinejoin="round" d="M7 3h7l4 4v14H7zM14 3v5h4" />
-      <path strokeLinecap="round" d="M10 13h5M10 17h5" />
-    </Icon>
-  );
-}
-
-function UnlockIcon() {
-  return (
-    <Icon>
-      <rect x="5" y="10" width="14" height="10" rx="2" />
-      <path strokeLinecap="round" d="M9 10V7a3 3 0 0 1 5.4-1.8" />
-    </Icon>
-  );
-}
-
-function BackIcon() {
-  return (
-    <Icon>
-      <path strokeLinecap="round" strokeLinejoin="round" d="m15 18-6-6 6-6" />
-    </Icon>
-  );
-}
-
-function ChevronRightIcon() {
-  return (
-    <Icon>
-      <path strokeLinecap="round" strokeLinejoin="round" d="m9 6 6 6-6 6" />
-    </Icon>
-  );
-}
-
-function ChevronUpIcon() {
-  return (
-    <Icon>
-      <path strokeLinecap="round" strokeLinejoin="round" d="m6 15 6-6 6 6" />
-    </Icon>
-  );
-}
-
-function CloseIcon() {
-  return (
-    <Icon>
-      <path strokeLinecap="round" d="M6 6l12 12M18 6 6 18" />
-    </Icon>
-  );
-}
-
-function PaperclipIcon() {
-  return (
-    <Icon>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="m15.5 7-6.7 6.7a2.5 2.5 0 0 0 3.5 3.6l6.3-6.4a4.5 4.5 0 0 0-6.4-6.3L5.8 11a6.5 6.5 0 0 0 9.2 9.2l5.5-5.5"
-      />
-    </Icon>
-  );
-}
-
-function ClockIcon() {
-  return (
-    <Icon>
-      <circle cx="12" cy="12" r="9" />
-      <path strokeLinecap="round" d="M12 7v5l3 2" />
-    </Icon>
-  );
-}
-
-function MicIcon() {
-  return (
-    <Icon>
-      <rect x="9" y="3" width="6" height="11" rx="3" />
-      <path strokeLinecap="round" d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" />
-    </Icon>
-  );
-}
-
-function StopIcon() {
-  return (
-    <svg
-      className="h-4 w-4"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <rect x="6" y="6" width="12" height="12" rx="2" />
-    </svg>
-  );
-}
-
-function SendIcon() {
-  return (
-    <Icon>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M4 4 21 12 4 20l3-8-3-8Zm3 8h7"
-      />
-    </Icon>
-  );
-}
-
-function SpinnerIcon() {
-  return (
-    <span
-      className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
-      aria-hidden="true"
-    />
-  );
-}
-
-
-function CopyIcon() {
-  return (
-    <Icon>
-      <rect x="8" y="8" width="11" height="11" rx="2" />
-      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
-    </Icon>
-  );
-}
-
-function ReplyIcon() {
-  return (
-    <Icon>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="m10 8-5 4 5 4v-3h4c3 0 5 1.5 6 4-.2-5.5-2.7-8-7-8h-3V8Z"
-      />
-    </Icon>
-  );
-}
-
-
-function EditIcon() {
-  return (
-    <Icon>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="m4 20 4.5-1 9.8-9.8-3.5-3.5L5 15.5 4 20ZM13.8 6.7l3.5 3.5"
-      />
-    </Icon>
-  );
-}
-

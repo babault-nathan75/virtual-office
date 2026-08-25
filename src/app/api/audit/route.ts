@@ -1,13 +1,9 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { requireAuth } from '@/lib/auth';
 import { z } from 'zod';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 const auditSchema = z.object({
   action: z.string().min(1).max(100),
@@ -42,7 +38,7 @@ export async function POST(request: Request) {
   const { action, details } = parsed.data;
   const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
 
-  const { error } = await supabaseAdmin.from('audit_logs').insert({
+  const { error } = await getSupabaseAdmin().from('audit_logs').insert({
     user_id: user.id,
     action,
     details: details || '',

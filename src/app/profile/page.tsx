@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
 import PasswordInput from '@/components/PasswordInput';
+import { formatDate } from '@/lib/i18n';
 
 type Profil = {
   id: string;
@@ -454,7 +455,7 @@ export default function Profile() {
 
         {profil.created_at && (
           <p className="text-center text-xs text-slate-400 font-medium pt-2">
-            Membre depuis le {new Date(profil.created_at).toLocaleDateString('fr-FR')}
+            Membre depuis le {formatDate(profil.created_at)}
           </p>
         )}
       </div>

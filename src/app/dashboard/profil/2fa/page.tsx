@@ -2,254 +2,263 @@
 
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
-import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
+import OtpInput from '@/components/OtpInput';
+import { Button } from '@/components/ui';
+import { AuthAlert } from '@/components/AuthShell';
+import TrustedDevices from '@/components/TrustedDevices';
+import { supabase } from '@/lib/supabaseClient';
+import { roleHomePath, type Role } from '@/lib/roles';
 
-export default function TwoFASetup() {
+type Step = 'idle' | 'enrolling' | 'enabled';
+
+/**
+ * Activation d'une application d'authentification (Google Authenticator,
+ * Authy, 1Password…).
+ *
+ * L'option « code par email » a disparu de cet écran : un code par email est
+ * désormais demandé à chaque connexion pour tous les comptes. La présenter
+ * comme un réglage à activer décrivait le comportement par défaut et laissait
+ * croire, quand elle était éteinte, que le compte n'était pas protégé.
+ */
+export default function TwoFactorSettingsPage() {
   const router = useRouter();
-  const [userId, setUserId] = useState('');
-  const [method, setMethod] = useState<'totp' | 'email' | null>(null);
+  const [step, setStep] = useState<Step>('idle');
+  const [checking, setChecking] = useState(true);
+  const [role, setRole] = useState<Role>('secretaire');
   const [qrData, setQrData] = useState('');
   const [secret, setSecret] = useState('');
+  const [showSecret, setShowSecret] = useState(false);
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState({ text: '', type: '' });
-  const [enabled, setEnabled] = useState(false);
-  const [checking, setChecking] = useState(true);
-  const [userRole, setUserRole] = useState('');
+  const [message, setMessage] = useState<{ text: string; type: 'error' | 'success' } | null>(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    let active = true;
+
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) {
         router.replace('/connexion');
         return;
       }
-      setUserId(session.user.id);
 
-      supabase.auth.getUser().then(({ data: { user } }) => {
-        setUserRole((user?.user_metadata?.role as string) || 'secretaire');
-      });
+      const [{ data: profil }, { data: tfa }] = await Promise.all([
+        supabase.from('profils').select('role').eq('id', session.user.id).maybeSingle(),
+        // `secret` n'est plus lisible par le client (GRANT au niveau colonne) :
+        // on ne demande que l'état d'activation.
+        supabase.from('two_factor_auth').select('enabled').eq('user_id', session.user.id).maybeSingle(),
+      ]);
 
-      supabase
-        .from('two_factor_auth')
-        .select('enabled')
-        .eq('user_id', session.user.id)
-        .maybeSingle()
-        .then(({ data }) => {
-          setEnabled(data?.enabled || false);
-          setChecking(false);
-        });
+      if (!active) return;
+      if (profil?.role) setRole(profil.role as Role);
+      if (tfa?.enabled) setStep('enabled');
+      setChecking(false);
     });
+
+    return () => {
+      active = false;
+    };
   }, [router]);
 
-  const handleSetup = async (chosenMethod: 'totp' | 'email') => {
+  const startEnrollment = async () => {
     setLoading(true);
-    setMessage({ text: '', type: '' });
+    setMessage(null);
 
-    const { data: profileData } = await supabase
-      .from('profils')
-      .select('email')
-      .eq('id', userId)
-      .maybeSingle();
+    try {
+      const response = await fetch('/api/2fa/setup', { method: 'POST' });
+      const data = await response.json();
 
-    const res = await fetch('/api/2fa/setup', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-email': profileData?.email || '',
-      },
-      body: JSON.stringify({ userId, method: chosenMethod }),
-    });
+      if (!response.ok) {
+        setMessage({ text: data.error ?? "L'activation a échoué.", type: 'error' });
+        return;
+      }
 
-    const data = await res.json();
-
-    if (!res.ok) {
-      setMessage({ text: data.error, type: 'error' });
+      setQrData(data.qrData);
+      setSecret(data.secret);
+      setStep('enrolling');
+    } catch {
+      setMessage({ text: 'Connexion au serveur impossible.', type: 'error' });
+    } finally {
       setLoading(false);
-      return;
     }
-
-    setMethod(chosenMethod);
-    if (data.qrData) setQrData(data.qrData);
-    if (data.secret) setSecret(data.secret);
-    if (chosenMethod === 'email') {
-      setMessage({ text: 'Code envoyé par email ! Vérifiez votre boîte.', type: 'success' });
-    }
-    setLoading(false);
   };
 
-  const handleVerify = async () => {
-    if (code.length !== 6) return;
+  const confirmEnrollment = async (value: string) => {
+    if (value.length !== 6 || loading) return;
     setLoading(true);
+    setMessage(null);
 
-    const res = await fetch('/api/2fa/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, code }),
-    });
+    try {
+      const response = await fetch('/api/2fa/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: value }),
+      });
+      const data = await response.json();
 
-    const data = await res.json();
+      if (!response.ok) {
+        setMessage({ text: data.error ?? 'Code incorrect.', type: 'error' });
+        setCode('');
+        return;
+      }
 
-    if (!res.ok) {
-      setMessage({ text: data.error || 'Erreur lors de la vérification', type: 'error' });
+      setStep('enabled');
+      setMessage({ text: 'Application d\'authentification activée.', type: 'success' });
+    } catch {
+      setMessage({ text: 'Connexion au serveur impossible.', type: 'error' });
+    } finally {
       setLoading(false);
-      return;
     }
-
-    setEnabled(true);
-    setMessage({ text: '2FA activée avec succès !', type: 'success' });
-    setLoading(false);
   };
 
   if (checking) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="min-h-screen flex items-center justify-center bg-slate-50" aria-busy="true">
+        <span className="sr-only">Chargement…</span>
         <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-50 to-blue-50/40 font-sans antialiased">
-      <div className="max-w-lg mx-auto py-12 px-4">
-        <Link href={userRole === 'admin' ? '/dashboard/admin' : userRole === 'entreprise' ? '/dashboard/entreprise' : '/dashboard/secretaire/profil'} className="text-sm text-blue-600 hover:underline font-bold mb-6 inline-block">
-          ← Retour au profil
+    <main id="main-content" className="min-h-screen bg-gradient-to-b from-slate-50 to-blue-50/40 font-sans antialiased">
+      <div className="max-w-lg mx-auto py-12 px-4 space-y-6">
+        <Link
+          href={roleHomePath(role)}
+          className="text-sm text-blue-600 hover:underline font-bold mb-6 inline-block"
+        >
+          ← Retour au tableau de bord
         </Link>
 
-        {userRole === 'admin' && !enabled && (
-          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3">
-            <span className="text-2xl">⚠️</span>
-            <div>
-              <p className="font-bold text-amber-800 text-sm">2FA obligatoire pour les administrateurs</p>
-              <p className="text-xs text-amber-600 mt-1">Vous devez activer l&apos;authentification à deux facteurs pour accéder au panneau d&apos;administration.</p>
-            </div>
+        {role === 'admin' && step !== 'enabled' && (
+          <div role="alert" className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+            <p className="font-bold text-amber-800 text-sm">
+              Application d&apos;authentification obligatoire pour les administrateurs
+            </p>
+            <p className="text-xs text-amber-700 mt-1">
+              Le panneau d&apos;administration donne accès aux données de tous les utilisateurs :
+              un second facteur hors email y est exigé.
+            </p>
           </div>
         )}
 
-        <div className="bg-white rounded-3xl border border-slate-100 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.08)] p-8">
-          <h1 className="text-2xl font-black tracking-tight text-slate-900 mb-2">Authentification à deux facteurs</h1>
-          <p className="text-sm text-slate-500 font-medium mb-8">Sécurisez votre compte avec la 2FA.</p>
+        <section className="bg-white rounded-3xl border border-slate-100 shadow-[0_30px_60px_-15px_rgba(15,23,42,0.08)] p-8">
+          <h1 className="text-2xl font-black tracking-tight text-slate-900 mb-2">
+            Application d&apos;authentification
+          </h1>
+          <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+            Par défaut, un code vous est envoyé par email à chaque connexion. En activant une
+            application d&apos;authentification, ce code sera généré hors ligne par votre
+            téléphone — plus rapide, et insensible à une compromission de votre boîte mail.
+          </p>
 
-          {message.text && (
-            <div className={`mb-6 p-4 rounded-xl text-sm font-medium text-center ${
-              message.type === 'error'
-                ? 'bg-red-50 text-red-700 border border-red-200'
-                : 'bg-green-50 text-green-700 border border-green-200'
-            }`}>
-              {message.text}
-            </div>
-          )}
+          {message && <AuthAlert type={message.type}>{message.text}</AuthAlert>}
 
-          {enabled ? (
-            <div className="text-center py-8">
-              {/* SVG en ligne à la place de l'icône CDN flaticon : une page de
-                  sécurité ne devrait pas dépendre d'un hôte tiers. */}
-              <svg className="mx-auto mb-4 h-16 w-16 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+          {step === 'enabled' && (
+            <div className="text-center py-6">
+              <svg className="mx-auto mb-4 h-14 w-14 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
                 <rect x="4" y="10" width="16" height="11" rx="2" />
                 <path strokeLinecap="round" d="M8 10V7a4 4 0 118 0v3" />
                 <circle cx="12" cy="15.5" r="1.25" fill="currentColor" stroke="none" />
               </svg>
-              <p className="text-green-700 font-bold text-lg">2FA activée</p>
-              <p className="text-slate-500 text-sm mt-2 mb-8">Votre compte est sécurisé.</p>
-              <Link href="/dashboard"
-                className="py-3 px-6 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-bold transition"
+              <p className="text-emerald-700 font-bold text-lg">Second facteur actif</p>
+              <p className="text-slate-500 text-sm mt-2 mb-6">
+                Vos codes de connexion proviennent désormais de votre application.
+              </p>
+              <Link
+                href={roleHomePath(role)}
+                className="inline-flex items-center justify-center py-3 px-6 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-bold transition"
               >
-                Tableau de bord
+                Retour au tableau de bord
               </Link>
             </div>
-          ) : !method ? (
-            /* Une première branche `method === null` interceptait ce cas et
-               n'affichait que le titre : les deux boutons de configuration
-               ci-dessous étaient donc inatteignables, et la page d'activation
-               de la 2FA se retrouvait sans aucune action possible. */
-            <div className="space-y-4">
-              <p className="text-sm text-slate-600 font-medium mb-4">Choisissez votre méthode :</p>
+          )}
 
-              <button
-                onClick={() => handleSetup('totp')}
-                disabled={loading}
-                className="w-full flex items-center gap-4 p-5 rounded-2xl border-2 border-slate-200 hover:border-blue-400 hover:bg-blue-50 transition-all text-left disabled:opacity-50"
-              >
-                <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-2xl">📱</div>
-                <div>
-                  <p className="font-extrabold text-slate-900">Google Authenticator</p>
-                  <p className="text-xs text-slate-500 mt-0.5">Scannez un QR code avec l&apos;appli</p>
-                </div>
-              </button>
+          {step === 'idle' && (
+            <Button
+              onClick={startEnrollment}
+              loading={loading}
+              disabled={loading}
+              variant="primary"
+              size="lg"
+              className="w-full rounded-xl"
+            >
+              Activer une application d&apos;authentification
+            </Button>
+          )}
 
-              <button
-                onClick={() => handleSetup('email')}
-                disabled={loading}
-                className="w-full flex items-center gap-4 p-5 rounded-2xl border-2 border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 transition-all text-left disabled:opacity-50"
-              >
-                <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center text-2xl">📧</div>
-                <div>
-                  <p className="font-extrabold text-slate-900">Code par email</p>
-                  <p className="text-xs text-slate-500 mt-0.5">Recevez un code à 6 chiffres par email</p>
-                </div>
-              </button>
-            </div>
-          ) : (
+          {step === 'enrolling' && (
             <div className="space-y-6">
-              {method === 'totp' && qrData && (
+              <ol className="text-sm text-slate-600 space-y-2 list-decimal list-inside">
+                <li>Ouvrez votre application d&apos;authentification.</li>
+                <li>Scannez le QR code ci-dessous.</li>
+                <li>Saisissez le code à 6 chiffres qu&apos;elle affiche.</li>
+              </ol>
+
+              {qrData && (
                 <div className="text-center">
-                  <p className="text-sm text-slate-600 font-medium mb-4">
-                    Scannez ce QR code avec Google Authenticator :
-                  </p>
                   <div className="inline-block p-4 bg-white rounded-2xl border border-slate-200 shadow-sm">
                     {/* `unoptimized` : le QR code est une data: URL générée en
                         mémoire, l'optimiseur d'images ne peut pas la traiter. */}
-                    <Image src={qrData} alt="QR Code 2FA" width={200} height={200} unoptimized />
+                    <Image src={qrData} alt="QR code d'activation" width={200} height={200} unoptimized />
                   </div>
-                  <p className="text-xs text-slate-400 mt-3">
-                    Secret : <span className="font-mono bg-slate-100 px-2 py-1 rounded">{secret}</span>
-                  </p>
                 </div>
               )}
 
-              {method === 'email' && (
-                <>
-                  <p className="text-sm text-slate-600 text-center">
-                    Un code à 6 chiffres a été envoyé par email.
+              <div className="text-center">
+                <button
+                  type="button"
+                  onClick={() => setShowSecret(value => !value)}
+                  className="text-xs font-bold text-slate-500 hover:text-slate-700 underline"
+                >
+                  {showSecret ? 'Masquer la clé' : 'Impossible de scanner ? Saisie manuelle'}
+                </button>
+                {showSecret && (
+                  <p className="mt-2 font-mono text-xs bg-slate-100 px-3 py-2 rounded-lg break-all select-all">
+                    {secret}
                   </p>
-                  <p className="text-sm text-slate-600 text-center">
-                    Si vous ne le voyez pas, vérifiez vos spams ou cliquez sur &laquo;&nbsp;Changer de méthode&nbsp;&raquo; pour réessayer.
-                  </p>
-                </>
-              )}
-
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Code à 6 chiffres</label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={6}
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-                  className="w-full text-center text-2xl font-mono tracking-[0.5em] rounded-xl border border-slate-200 px-4 py-4 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="000000"
-                  autoFocus
-                />
+                )}
               </div>
 
-              <button
-                onClick={handleVerify}
+              <OtpInput
+                value={code}
+                onChange={setCode}
+                onComplete={confirmEnrollment}
+                disabled={loading}
+                invalid={message?.type === 'error'}
+                autoFocus
+              />
+
+              <Button
+                onClick={() => confirmEnrollment(code)}
+                loading={loading}
                 disabled={loading || code.length !== 6}
-                className="w-full py-4 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-extrabold tracking-tight text-base transition shadow-lg shadow-blue-200 disabled:opacity-60 disabled:cursor-not-allowed"
+                variant="primary"
+                size="lg"
+                className="w-full rounded-xl"
               >
-                {loading ? 'Vérification...' : 'Activer la 2FA'}
-              </button>
+                Activer
+              </Button>
 
               <button
-                onClick={() => { setMethod(null); setCode(''); setQrData(''); setSecret(''); setMessage({ text: '', type: '' }); }}
+                type="button"
+                onClick={() => {
+                  setStep('idle');
+                  setCode('');
+                  setQrData('');
+                  setSecret('');
+                  setMessage(null);
+                }}
                 className="w-full py-3 text-sm text-slate-500 hover:text-slate-700 font-bold"
               >
-                Changer de méthode
+                Annuler
               </button>
             </div>
           )}
-        </div>
+        </section>
+
+        <TrustedDevices />
       </div>
     </main>
   );

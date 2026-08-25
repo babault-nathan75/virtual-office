@@ -1,79 +1,93 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
-import * as OTPAuth from 'otpauth';
-import { getAuthenticatedUser } from '@/lib/auth';
 import { z } from 'zod';
+import * as OTPAuth from 'otpauth';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
+import { getAuthenticatedUser } from '@/lib/auth';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+export const runtime = 'nodejs';
 
-const verifySchema = z.object({
-  userId: z.string().uuid(),
-  code: z.string().length(6, 'Le code doit contenir 6 chiffres'),
+const bodySchema = z.object({
+  code: z.string().regex(/^\d{6}$/, 'Le code doit contenir 6 chiffres.'),
 });
 
+/**
+ * Confirme l'enrôlement : l'utilisateur prouve que son application génère bien
+ * les mêmes codes avant que le second facteur ne devienne obligatoire.
+ *
+ * Sans cette étape, un utilisateur qui aurait mal scanné le QR code se
+ * retrouverait définitivement enfermé dehors à sa prochaine connexion.
+ */
 export async function POST(request: Request) {
-  const rateLimitResult = await checkRateLimit(`2fa-verify:${getClientIp(request)}`, 5, 60000);
-  if (!rateLimitResult.allowed) {
-    return NextResponse.json({ error: 'Trop de requêtes. Réessayez plus tard.' }, { status: 429 });
-  }
-
-  const body = await request.json();
-  const parsed = verifySchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: 'Données invalides' }, { status: 400 });
-  }
-
-  const { userId, code } = parsed.data;
-
   const user = await getAuthenticatedUser();
-  if (!user || user.id !== userId) {
+  if (!user) {
     return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
   }
 
-  const { data: tfa, error } = await supabaseAdmin
+  const rate = await checkRateLimit(`2fa-verify:${user.id}:${getClientIp(request)}`, 8, 60_000);
+  if (!rate.allowed) {
+    return NextResponse.json({ error: 'Trop de tentatives. Réessayez plus tard.' }, { status: 429 });
+  }
+
+  let raw: unknown;
+  try {
+    raw = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Corps de requête invalide.' }, { status: 400 });
+  }
+
+  const parsed = bodySchema.safeParse(raw);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message ?? 'Données invalides.' },
+      { status: 400 }
+    );
+  }
+
+  const supabase = getSupabaseAdmin();
+
+  const { data: tfa } = await supabase
     .from('two_factor_auth')
     .select('secret, method, enabled')
-    .eq('user_id', userId)
+    .eq('user_id', user.id)
     .maybeSingle();
 
-  if (error || !tfa) {
-    return NextResponse.json({ error: 'La 2FA n\'a pas été initialisée. Veuillez d\'abord activer la 2FA.' }, { status: 400 });
+  if (!tfa) {
+    return NextResponse.json(
+      { error: "Aucune configuration en cours. Recommencez l'activation." },
+      { status: 400 }
+    );
   }
 
   if (tfa.enabled) {
-    return NextResponse.json({ error: 'La 2FA est déjà activée sur votre compte.' }, { status: 400 });
+    return NextResponse.json({ error: 'Le second facteur est déjà activé.' }, { status: 409 });
   }
 
-  let isValid = false;
+  const totp = new OTPAuth.TOTP({
+    issuer: 'SecretariatPro',
+    label: user.email ?? user.id,
+    algorithm: 'SHA1',
+    digits: 6,
+    period: 30,
+    secret: OTPAuth.Secret.fromBase32(tfa.secret),
+  });
 
-  if (tfa.method === 'totp') {
-    const totp = new OTPAuth.TOTP({
-      issuer: 'SecretariatPro',
-      label: userId,
-      algorithm: 'SHA1',
-      digits: 6,
-      period: 30,
-      secret: OTPAuth.Secret.fromBase32(tfa.secret),
-    });
-    isValid = totp.validate({ token: code, window: 1 }) !== null;
-  } else if (tfa.method === 'email') {
-    const parts = tfa.secret.split(':');
-    const storedCode = parts[1];
-    isValid = code === storedCode;
+  if (totp.validate({ token: parsed.data.code, window: 1 }) === null) {
+    return NextResponse.json(
+      { error: "Code incorrect. Vérifiez l'heure de votre téléphone puis réessayez." },
+      { status: 400 }
+    );
   }
 
-  if (!isValid) {
-    return NextResponse.json({ error: 'Code invalide' }, { status: 400 });
-  }
-
-  await supabaseAdmin
+  const { error } = await supabase
     .from('two_factor_auth')
-    .update({ enabled: true })
-    .eq('user_id', userId);
+    .update({ enabled: true, updated_at: new Date().toISOString() })
+    .eq('user_id', user.id);
 
-  return NextResponse.json({ success: true });
+  if (error) {
+    console.error('[2fa/verify]', error.message);
+    return NextResponse.json({ error: 'Activation impossible.' }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true });
 }

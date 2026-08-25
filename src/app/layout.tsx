@@ -6,7 +6,10 @@ import Footer from "@/components/Footer";
 import { ToastContainer } from "@/components/Toast";
 import Providers from "@/components/Providers";
 import { SpeedInsights } from "@vercel/speed-insights/next";
-import { OrganizationJsonLd, WebSiteJsonLd } from "@/components/JsonLd";
+import { getSiteUrl } from "@/lib/env";
+import { OG_LOCALE } from '@/lib/i18n';
+
+const siteUrl = getSiteUrl();
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -20,23 +23,53 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "SecrétariatPro - Mise en relation entreprises et secrétaires",
+    default: "SecrétariatPro — Trouvez une secrétaire qualifiée ou une mission",
     template: "%s | SecrétariatPro",
   },
-  description: "Plateforme de mise en relation entre entreprises et secrétaires qualifiées. Trouvez la secrétaire idéale ou publiez vos missions en quelques clics.",
+  description:
+    "Plateforme de mise en relation entre entreprises et secrétaires qualifiées. Profils vérifiés, mise en relation en quelques minutes, contrats générés automatiquement.",
   applicationName: "SecrétariatPro",
+  // Renseignés pour les moteurs et les réseaux sociaux ; absents jusqu'ici, ce
+  // qui privait les pages de tout signal d'auteur et de langue alternative.
+  authors: [{ name: "SecrétariatPro" }],
+  creator: "SecrétariatPro",
+  publisher: "SecrétariatPro",
+  category: "business",
+  keywords: [
+    "secrétaire",
+    "télésecrétariat",
+    "secrétaire indépendante",
+    "assistante administrative",
+    "mission secrétariat",
+    "Côte d'Ivoire",
+  ],
   appleWebApp: {
     capable: true,
     title: "SecrétariatPro",
     statusBarStyle: "default",
   },
   formatDetection: { telephone: false },
+  // Sans canonical explicite, chaque déploiement de prévisualisation Vercel
+  // devient une copie indexable du site en production.
+  alternates: { canonical: siteUrl },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
+  },
   openGraph: {
-    title: "SecrétariatPro - Mise en relation entreprises et secrétaires",
-    description: "Plateforme de mise en relation entre entreprises et secrétaires qualifiées.",
-    url: "https://secretariatpro-drab.vercel.app",
+    title: "SecrétariatPro — Trouvez une secrétaire qualifiée ou une mission",
+    description:
+      "Profils vérifiés, mise en relation en quelques minutes, contrats générés automatiquement.",
+    url: siteUrl,
     siteName: "SecrétariatPro",
-    locale: "fr_FR",
+    locale: OG_LOCALE,
     type: "website",
   },
   twitter: {
@@ -44,7 +77,7 @@ export const metadata: Metadata = {
     title: "SecrétariatPro",
     description: "Mise en relation entre entreprises et secrétaires qualifiées.",
   },
-  metadataBase: new URL("https://secretariatpro-drab.vercel.app"),
+  metadataBase: new URL(siteUrl),
 };
 
 export const viewport: Viewport = {
@@ -69,8 +102,12 @@ export default function RootLayout({
         <link rel="icon" href="/icon.png" type="image/png" sizes="256x256" />
         <link rel="apple-touch-icon" href="/apple-icon.png" />
         <link rel="manifest" href="/manifest.json" />
-        <OrganizationJsonLd />
-        <WebSiteJsonLd />
+        {/* Négociation TLS engagée avant même que le script ne soit demandé :
+            économise environ un aller-retour sur les écrans d'authentification. */}
+        <link rel="preconnect" href="https://challenges.cloudflare.com" />
+        {process.env.NEXT_PUBLIC_SUPABASE_URL && (
+          <link rel="preconnect" href={new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin} crossOrigin="anonymous" />
+        )}
         {process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN && (
           <script defer data-domain={process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN} src="https://plausible.io/js/script.js" />
         )}

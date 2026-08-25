@@ -1,8 +1,10 @@
 import Link from '@/components/Link';
 import Image from 'next/image';
 import HeroCTA from '@/components/HeroCTA';
-import { FAQJsonLd } from '@/components/JsonLd';
+import { FAQJsonLd, OrganizationJsonLd, WebSiteJsonLd } from '@/components/JsonLd';
 import type { Metadata } from 'next';
+import { OG_LOCALE } from '@/lib/i18n';
+import { getSiteUrl } from '@/lib/env';
 
 export const metadata: Metadata = {
   title: 'SecrétariatPro - Secrétaire en ligne pour entreprise',
@@ -10,9 +12,9 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'SecrétariatPro - Secrétaire en ligne pour entreprise',
     description: 'Trouvez la secrétaire idéale ou publiez vos missions en quelques clics. Flexible, sans engagement.',
-    url: 'https://secretariatpro-drab.vercel.app',
+    url: getSiteUrl(),
     siteName: 'SecrétariatPro',
-    locale: 'fr_FR',
+    locale: OG_LOCALE,
     type: 'website',
     images: [{ url: '/logo.png', width: 1200, height: 630, alt: 'SecrétariatPro' }],
   },
@@ -27,6 +29,13 @@ export const metadata: Metadata = {
 export default function Home() {
   return (
     <main className="min-h-screen bg-slate-50 flex flex-col items-center font-sans antialiased selection:bg-blue-500 selection:text-white">
+      {/* Organization et WebSite décrivent le site entier ; ils vivent sur la
+          page d'accueil, sa page canonique. Les laisser dans le layout racine
+          les injectait aussi dans le tableau de bord — pages en `noindex`, et
+          désormais servies sous un CSP à nonce qui bloque tout script en ligne
+          non signé, y compris un bloc `application/ld+json`. */}
+      <OrganizationJsonLd />
+      <WebSiteJsonLd />
       <FAQJsonLd />
 
       {/* HERO SECTION */}
