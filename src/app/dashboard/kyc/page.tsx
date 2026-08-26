@@ -9,6 +9,7 @@ import { Button, Breadcrumbs } from '@/components/ui';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { roleHome, type Role } from '@/lib/roleStore';
+import { revalidateScope } from '@/lib/actions/cache';
 
 type FormData = {
   prenoms: string;
@@ -172,6 +173,15 @@ export default function KycPage() {
       nom: form.nom.trim(),
       date_naissance: form.date_naissance,
       nationalite: form.nationalite.trim() || null,
+      // Toujours « secretaire » : cet écran redirige tout compte d'un autre
+      // rôle (voir le garde plus haut), il n'existe donc aujourd'hui aucun
+      // parcours de vérification d'identité pour les entreprises.
+      //
+      // Conséquence à connaître : `dashboard/secretaire/missions` filtre les
+      // dossiers sur `type_compte = 'entreprise'` et ne trouvera jamais rien —
+      // une secrétaire ne peut pas savoir si l'entreprise qui la sollicite a
+      // été vérifiée. Combler ce manque est un travail de produit, pas une
+      // correction de filtre.
       type_compte: 'secretaire',
       piece_identite_url: identiteUrl,
       selfie_url: selfieUrl,
@@ -228,7 +238,12 @@ export default function KycPage() {
 
     setExistingKyc({ statut: 'pending', motif_rejet: null });
     toast.success('KYC soumis ! En attente de validation par un administrateur.');
+    // Fait apparaître le dossier dans la file d'attente des administrateurs, et
+    // met à jour le statut affiché sur le tableau de bord de la secrétaire,
+    // tous deux servis depuis un cache.
+    await revalidateScope('admin-kyc');
     router.push('/dashboard');
+    router.refresh();
   };
 
   if (loading) {

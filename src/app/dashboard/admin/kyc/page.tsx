@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { Skeleton, SkeletonCard } from '@/components/Skeleton';
 import { supabase } from '@/lib/supabaseClient';
@@ -9,6 +10,7 @@ import Link from '@/components/Link';
 import { toast } from '@/components/Toast';
 import { getKycSignedUrl, KYC_BUCKETS } from '@/lib/kycStorage';
 import { formatDate } from '@/lib/i18n';
+import { decideKyc } from '@/lib/actions/adminKyc';
 
 type KycEntry = {
   id: string;
@@ -50,6 +52,7 @@ export default function AdminKycPage() {
   const [loading, setLoading] = useState(true);
   const [kycList, setKycList] = useState<KycEntry[]>([]);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [acting, setActing] = useState<string | null>(null);
   const [selectedKyc, setSelectedKyc] = useState<KycEntry | null>(null);
   const [signedUrls, setSignedUrls] = useState<{ piece: string; selfie: string; doc: string | null } | null>(null);
@@ -71,11 +74,31 @@ export default function AdminKycPage() {
   };
 
   async function loadKyc() {
-    const { data: kycs } = await supabase
+    /*
+     * Deux corrections ici.
+     *
+     * 1. L'erreur était ignorée, et `if (!kycs) return` transformait tout
+     *    échec — droits insuffisants, table absente, réseau — en un « Aucune
+     *    vérification en attente » parfaitement convaincant. C'est ce qui
+     *    rendait l'écart avec le tableau de bord impossible à diagnostiquer.
+     *
+     * 2. Le filtre `type_compte = 'secretaire'` écartait de la file tout
+     *    dossier déposé par un autre type de compte. Un dossier compté sur le
+     *    tableau de bord devenait alors introuvable ici, donc impossible à
+     *    traiter.
+     */
+    const { data: kycs, error } = await supabase
       .from('kyc_verifications')
-      .select('*')
-      .eq('type_compte', 'secretaire');
+      .select('*');
 
+    if (error) {
+      console.error('[admin/kyc] lecture :', error.message);
+      setLoadError(error.message);
+      setKycList([]);
+      return;
+    }
+
+    setLoadError(null);
     if (!kycs) return;
 
     // Tri effectué côté client sur la date de dernière soumission : un dossier
@@ -101,6 +124,13 @@ export default function AdminKycPage() {
     })) as KycEntry[]);
   }
 
+  /*
+   * La file d'attente se remplit pendant qu'on la regarde : un dossier soumis
+   * après l'ouverture de la page n'apparaissait jamais. Rechargement au retour
+   * sur l'onglet, et toutes les deux minutes tant qu'il est visible.
+   */
+  useAutoRefresh(loadKyc, { intervalMs: 120_000 });
+
   useEffect(() => {
     const fetchData = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -122,13 +152,16 @@ export default function AdminKycPage() {
     setActing(kycId);
     const kyc = kycList.find(k => k.id === kycId);
 
-    const { error } = await supabase
-      .from('kyc_verifications')
-      .update({ statut: 'approved', updated_at: new Date().toISOString() })
-      .eq('id', kycId);
+    // L'écriture passe par l'action serveur : elle vérifie l'autorisation et
+    // invalide le cache du tableau de bord, que l'écriture directe depuis le
+    // navigateur laissait intact — d'où un dossier approuvé qui continuait d'y
+    // apparaître « en attente ».
+    const result = kyc
+      ? await decideKyc({ userId: kyc.user_id, decision: 'approved' })
+      : ({ ok: false, error: 'Dossier introuvable.' } as const);
 
-    if (error) {
-      toast.error(error.message);
+    if (!result.ok) {
+      toast.error(result.error);
     } else {
       toast.success('KYC approuvé !');
       setKycList(prev => prev.map(k => k.id === kycId ? { ...k, statut: 'approved', updated_at: new Date().toISOString() } : k));
@@ -154,17 +187,16 @@ export default function AdminKycPage() {
     setActing(rejectModal);
     const kyc = kycList.find(k => k.id === rejectModal);
 
-    const { error } = await supabase
-      .from('kyc_verifications')
-      .update({
-        statut: 'rejected',
-        updated_at: new Date().toISOString(),
-        motif_rejet: rejectReason.trim() || null,
-      })
-      .eq('id', rejectModal);
+    const result = kyc
+      ? await decideKyc({
+          userId: kyc.user_id,
+          decision: 'rejected',
+          motif: rejectReason.trim(),
+        })
+      : ({ ok: false, error: 'Dossier introuvable.' } as const);
 
-    if (error) {
-      toast.error(error.message);
+    if (!result.ok) {
+      toast.error(result.error);
     } else {
       toast.success('KYC refusé.');
       setKycList(prev => prev.map(k => k.id === rejectModal ? { ...k, statut: 'rejected', motif_rejet: rejectReason.trim() || null } : k));
@@ -231,7 +263,29 @@ export default function AdminKycPage() {
           ))}
         </div>
 
-        {filtered.length === 0 ? (
+        {/*
+          Un échec de lecture affichait auparavant le même écran vert
+          « Aucune vérification en attente » qu'une file réellement vide. Les
+          deux états sont désormais distincts : impossible de confondre « rien
+          à traiter » et « je n'ai pas pu regarder ».
+        */}
+        {loadError ? (
+          <div role="alert" className="bg-red-50 p-8 rounded-2xl border border-red-200 text-center">
+            <p className="font-bold text-red-800">Impossible de charger les dossiers.</p>
+            <p className="text-sm text-red-700 mt-2 font-mono break-words">{loadError}</p>
+            <p className="text-xs text-red-600 mt-3">
+              La liste ci-dessous est vide parce que la lecture a échoué, pas parce
+              qu&apos;aucun dossier n&apos;est en attente.
+            </p>
+            <button
+              type="button"
+              onClick={() => { setLoading(true); loadKyc().finally(() => setLoading(false)); }}
+              className="mt-4 px-4 py-2 rounded-full bg-red-600 text-white text-sm font-bold hover:bg-red-700 transition"
+            >
+              Réessayer
+            </button>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="bg-white p-12 rounded-2xl border border-dashed border-slate-200 text-center">
             <p className="text-4xl mb-3">✅</p>
             <p className="text-slate-500 font-medium">Aucune vérification {filter === 'pending' ? 'en attente' : 'trouvée'}.</p>

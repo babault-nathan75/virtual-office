@@ -12,12 +12,20 @@ import { escapeHtml } from '@/lib/sanitize';
  */
 let transporter: Transporter | null = null;
 
+function smtpPort(): number {
+  return Number(process.env.SMTP_PORT || 587);
+}
+
+function smtpHost(): string {
+  return process.env.SMTP_HOST || 'smtp.gmail.com';
+}
+
 function getTransporter(): Transporter {
   if (!transporter) {
     transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: Number(process.env.SMTP_PORT || 587) === 465,
+      host: smtpHost(),
+      port: smtpPort(),
+      secure: smtpPort() === 465,
       auth: { user: env.smtpUser, pass: env.smtpPass },
       pool: true,
       maxConnections: 3,
@@ -34,14 +42,15 @@ function getTransporter(): Transporter {
  * utilisateurs actifs quotidiens — et une fois atteint, ce sont les connexions
  * elles-mêmes qui cessent de fonctionner, pas seulement les notifications.
  *
- * La bascule est donc préparée ici plutôt que repoussée : renseigner
- * `RESEND_API_KEY` suffit à changer de fournisseur, sans toucher au code ni
- * ajouter de dépendance (l'API Resend est un simple appel HTTP). Le SMTP reste
- * le mode par défaut tant que la clé est absente.
+ * Trois voies possibles, par ordre de priorité. Les deux API HTTP sont
+ * préférables au SMTP en environnement sans serveur : elles n'ouvrent pas de
+ * connexion longue, et surtout elles ne dépendent pas d'une adresse IP
+ * d'origine — voir la note sur les IP autorisées plus bas.
  */
-export type MailProvider = 'resend' | 'smtp' | 'none';
+export type MailProvider = 'brevo' | 'resend' | 'smtp' | 'none';
 
 export function getMailProvider(): MailProvider {
+  if (process.env.BREVO_API_KEY) return 'brevo';
   if (process.env.RESEND_API_KEY) return 'resend';
   if (process.env.SMTP_USER && process.env.SMTP_PASS) return 'smtp';
   return 'none';
@@ -52,18 +61,53 @@ export function isMailConfigured(): boolean {
 }
 
 /**
- * Adresse d'expédition.
+ * Identifiants de connexion qui ne sont PAS des adresses d'expédition.
  *
- * Resend impose une adresse sur un domaine vérifié : réutiliser l'adresse
- * Gmail y ferait échouer tous les envois. `MAIL_FROM` permet de la déclarer
- * indépendamment du compte SMTP.
+ * Brevo, Mailjet ou SendGrid authentifient le relais SMTP avec un identifiant
+ * technique (`b315a6001@smtp-brevo.com`, `apikey`…). Envoyer « de la part de »
+ * cet identifiant est refusé par le fournisseur, et serait de toute façon
+ * illisible pour le destinataire. L'adresse d'expédition doit être déclarée
+ * séparément, dans `MAIL_FROM`.
  */
-function fromAddress(): string {
-  const explicit = process.env.MAIL_FROM;
+const RELAY_LOGIN_PATTERN = /@(smtp-brevo\.com|sendinblue\.com|mailjet\.com)$|^apikey$/i;
+
+export type FromAddress = { name: string; email: string };
+
+/**
+ * Adresse d'expédition, sous forme structurée.
+ *
+ * Échoue explicitement plutôt que d'envoyer depuis une adresse invalide : une
+ * erreur claire au premier envoi vaut mieux qu'un rejet opaque du fournisseur,
+ * ou pire, des emails partis depuis une adresse que personne ne reconnaît et
+ * que les filtres classent en indésirable.
+ */
+export function getFromAddress(): FromAddress {
+  const explicit = process.env.MAIL_FROM?.trim();
+
   if (explicit) {
-    return explicit.includes('<') ? explicit : `"SecrétariatPro" <${explicit}>`;
+    const match = explicit.match(/^\s*"?([^"<]*)"?\s*<([^>]+)>\s*$/);
+    if (match) {
+      return { name: match[1].trim() || 'SecrétariatPro', email: match[2].trim() };
+    }
+    return { name: 'SecrétariatPro', email: explicit };
   }
-  return `"SecrétariatPro" <${env.smtpUser}>`;
+
+  const user = process.env.SMTP_USER?.trim();
+
+  if (!user || RELAY_LOGIN_PATTERN.test(user)) {
+    throw new Error(
+      "MAIL_FROM est requis : l'identifiant de connexion SMTP n'est pas une adresse " +
+        "d'expédition valide. Renseignez une adresse vérifiée chez votre fournisseur, " +
+        'par exemple MAIL_FROM="SecrétariatPro <no-reply@votre-domaine.com>".'
+    );
+  }
+
+  return { name: 'SecrétariatPro', email: user };
+}
+
+/** Même adresse, au format d'en-tête RFC 5322. */
+export function formatFromHeader(from: FromAddress = getFromAddress()): string {
+  return `"${from.name.replace(/"/g, '')}" <${from.email}>`;
 }
 
 type SendOptions = {
@@ -77,13 +121,39 @@ export async function sendMail({ to, subject, html, text }: SendOptions): Promis
   const provider = getMailProvider();
   if (provider === 'none') {
     throw new Error(
-      "Aucun fournisseur d'email configuré (RESEND_API_KEY, ou SMTP_USER + SMTP_PASS)."
+      "Aucun fournisseur d'email configuré (BREVO_API_KEY, RESEND_API_KEY, ou SMTP_USER + SMTP_PASS)."
     );
   }
+
+  const from = getFromAddress();
 
   // Une alternative texte réduit nettement le score anti-spam d'un email
   // purement HTML, et reste lisible sur les clients qui la préfèrent.
   const plain = text ?? html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+  if (provider === 'brevo') {
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'api-key': process.env.BREVO_API_KEY!,
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        sender: { name: from.name, email: from.email },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html,
+        textContent: plain,
+      }),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(`Brevo a refusé l'envoi (${response.status}) : ${detail.slice(0, 300)}`);
+    }
+    return;
+  }
 
   if (provider === 'resend') {
     const response = await fetch('https://api.resend.com/emails', {
@@ -92,7 +162,13 @@ export async function sendMail({ to, subject, html, text }: SendOptions): Promis
         Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ from: fromAddress(), to: [to], subject, html, text: plain }),
+      body: JSON.stringify({
+        from: formatFromHeader(from),
+        to: [to],
+        subject,
+        html,
+        text: plain,
+      }),
     });
 
     if (!response.ok) {
@@ -102,7 +178,13 @@ export async function sendMail({ to, subject, html, text }: SendOptions): Promis
     return;
   }
 
-  await getTransporter().sendMail({ from: fromAddress(), to, subject, html, text: plain });
+  await getTransporter().sendMail({
+    from: formatFromHeader(from),
+    to,
+    subject,
+    html,
+    text: plain,
+  });
 }
 
 /**

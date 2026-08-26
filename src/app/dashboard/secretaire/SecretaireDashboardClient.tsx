@@ -7,6 +7,7 @@ import { toast } from '@/components/Toast';
 import KycStatusBanner from '@/components/KycStatusBanner';
 import { postulerAction } from '@/lib/data/secretaire-client';
 import { LOCALE } from '@/lib/i18n';
+import RefreshOnReturn from '@/components/RefreshOnReturn';
 
 type Mission = {
   id: number;
@@ -115,6 +116,10 @@ export default function SecretaireDashboardClient({
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans antialiased text-slate-800 animate-[fadeSlideIn_0.3s_ease-out]">
+
+    {/* Remet l'écran à jour au retour sur l'onglet, sans rechargement. */}
+
+    <RefreshOnReturn />
       <div className="max-w-6xl mx-auto">
         {/* HEADER */}
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-sm mb-8 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 relative overflow-hidden">

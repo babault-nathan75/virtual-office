@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
@@ -14,73 +14,56 @@ export default function AdminMessagesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let mounted = true;
+  /*
+   * Chargement extrait dans une fonction réutilisable.
+   *
+   * Le bouton « Réessayer » appelait `window.location.reload()` : il
+   * rechargeait toute l'application pour rejouer deux requêtes. Il relance
+   * maintenant simplement ce chargement.
+   */
+  const loadSession = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
 
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
 
-        // 1. Vérification de la session
-        const {
-          data: { session },
-          error: sessionError,
-        } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
 
-        if (sessionError) {
-          throw sessionError;
-        }
-
-        if (!session) {
-          router.replace('/connexion');
-          return;
-        }
-
-        // 2. Vérification du rôle
-        const { data: profil, error: profilError } = await supabase
-          .from('profils')
-          .select('role')
-          .eq('id', session.user.id)
-          .maybeSingle();
-
-        if (profilError) {
-          throw profilError;
-        }
-
-        if (!profil || profil.role !== 'admin') {
-          router.replace('/dashboard');
-          return;
-        }
-
-        // 3. Initialisation de l'utilisateur
-        if (mounted) {
-          setUserId(session.user.id);
-        }
-      } catch (err) {
-        console.error(
-          'Erreur lors du chargement de la messagerie admin :',
-          err
-        );
-
-        if (mounted) {
-          setError(
-            "Impossible de charger la messagerie pour le moment. Veuillez réessayer."
-          );
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
+      if (!session) {
+        router.replace('/connexion');
+        return;
       }
-    };
 
-    fetchData();
+      const { data: profil, error: profilError } = await supabase
+        .from('profils')
+        .select('role')
+        .eq('id', session.user.id)
+        .maybeSingle();
 
-    return () => {
-      mounted = false;
-    };
+      if (profilError) throw profilError;
+
+      if (!profil || profil.role !== 'admin') {
+        router.replace('/dashboard');
+        return;
+      }
+
+      setUserId(session.user.id);
+    } catch (err) {
+      console.error('Erreur lors du chargement de la messagerie admin :', err);
+      setError("Impossible de charger la messagerie pour le moment. Veuillez réessayer.");
+    } finally {
+      setLoading(false);
+    }
   }, [router]);
+
+  useEffect(() => {
+    void loadSession();
+  }, [loadSession]);
+
 
   // État de chargement
   if (loading) {
@@ -118,7 +101,7 @@ export default function AdminMessagesPage() {
 
             <button
               type="button"
-              onClick={() => window.location.reload()}
+              onClick={() => void loadSession()}
               className="mt-6 inline-flex h-11 items-center justify-center rounded-xl bg-slate-900 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2"
             >
               Réessayer

@@ -7,6 +7,7 @@ import { toast } from '@/components/Toast';
 import { Button, Card, Breadcrumbs } from '@/components/ui';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { getPushState, registerPush, unregisterPush } from '@/lib/pushClient';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh';
 
 type Preferences = {
   messages: boolean;
@@ -67,6 +68,17 @@ export default function NotificationPreferencesPage() {
   const [pushState, setPushState] = useState<Awaited<ReturnType<typeof getPushState>> | null>(null);
   const [pushBusy, setPushBusy] = useState(false);
 
+  /*
+   * Rechargement automatique au retour sur l'onglet et après une reconnexion.
+   *
+   * L'écran ne se chargeait qu'au montage : un onglet laissé ouvert affichait
+   * indéfiniment un état périmé, et le seul recours était de recharger la page.
+   * Incrémenter cette clé rejoue l'effet de chargement existant — y compris sa
+   * vérification de session, ce qui est souhaitable après une longue absence.
+   */
+  const [refreshKey, setRefreshKey] = useState(0);
+  useAutoRefresh(() => setRefreshKey(key => key + 1));
+
   useEffect(() => {
     const load = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -96,7 +108,7 @@ export default function NotificationPreferencesPage() {
     };
 
     load();
-  }, [router]);
+  }, [router, refreshKey]);
 
   const handleSave = async () => {
     setSaving(true);

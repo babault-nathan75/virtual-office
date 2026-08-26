@@ -1,6 +1,7 @@
 'use client';
 
 import { createBrowserClient } from '@supabase/ssr';
+import { revalidateScope } from '@/lib/actions/cache';
 
 function getSupabase() {
   return createBrowserClient(
@@ -73,11 +74,17 @@ export async function postulerAction(userId: string, missionId: number) {
   const { error } = await supabase
     .from('candidatures')
     .insert([{ mission_id: missionId, secretaire_id: userId, statut: 'en_attente' }]);
+
+  if (!error) await revalidateScope('candidatures');
   return { error: error ? { message: error.message, code: error.code } as ActionError : null };
 }
 
 export async function updateProfilAction(userId: string, data: Partial<SecretaireProfil>) {
   const supabase = getSupabase();
   const { error } = await supabase.from('profils_secretaires').upsert({ id: userId, ...data });
+  // La fiche est aussi lue par la recherche côté entreprise, avec son propre
+  // cache d'une heure : sans invalidation, une modification de profil restait
+  // invisible pendant tout ce temps.
+  if (!error) await revalidateScope('profil-secretaire');
   return { error: error ? { message: error.message, code: error.code } as ActionError : null };
 }

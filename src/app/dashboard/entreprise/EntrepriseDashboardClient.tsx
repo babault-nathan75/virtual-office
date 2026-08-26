@@ -7,6 +7,7 @@ import { toast } from '@/components/Toast';
 import { ConfirmDialog } from '@/components/ui';
 import NotificationBell from '@/components/NotificationBell';
 import { proposerOffreAction, refuserCandidatureAction, EntrepriseDashboardData } from '@/lib/data/entreprise-client';
+import RefreshOnReturn from '@/components/RefreshOnReturn';
 
 type Props = {
   initialData: EntrepriseDashboardData;
@@ -118,6 +119,10 @@ export default function EntrepriseDashboardClient({ initialData, userId, userNam
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8 animate-[fadeSlideIn_0.3s_ease-out]">
+
+    {/* Remet l'écran à jour au retour sur l'onglet, sans rechargement. */}
+
+    <RefreshOnReturn />
       <div className="max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
           <div className="flex items-center gap-4">

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
+import { revalidateScope } from '@/lib/actions/cache';
 
 export default function NouvelleMission() {
   const router = useRouter();
@@ -46,8 +47,16 @@ export default function NouvelleMission() {
       setErrorMsg(insertError.message);
       setLoading(false);
     } else {
-      // 3. Succès ! Redirection vers le tableau de bord
+      /*
+       * Le tableau de bord de l'entreprise est rendu côté serveur et mis en
+       * cache 30 secondes. Sans cette invalidation, la mission tout juste
+       * créée n'y apparaissait pas : l'utilisateur concluait que la création
+       * avait échoué et rechargeait la page — c'est précisément le geste
+       * qu'on veut rendre inutile.
+       */
+      await revalidateScope('missions');
       router.push('/dashboard/entreprise');
+      router.refresh();
     }
   };
 

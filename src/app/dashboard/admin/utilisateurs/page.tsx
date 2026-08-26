@@ -7,6 +7,8 @@ import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
 import { formatDate } from '@/lib/i18n';
+import { revalidateScope } from '@/lib/actions/cache';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh';
 
 type Profil = {
   id: string;
@@ -44,6 +46,17 @@ export default function GestionUtilisateurs() {
     | { kind: 'delete'; userId: string; nom: string }
     | null
   >(null);
+
+  /*
+   * Rechargement automatique au retour sur l'onglet et après une reconnexion.
+   *
+   * L'écran ne se chargeait qu'au montage : un onglet laissé ouvert affichait
+   * indéfiniment un état périmé, et le seul recours était de recharger la page.
+   * Incrémenter cette clé rejoue l'effet de chargement existant — y compris sa
+   * vérification de session, ce qui est souhaitable après une longue absence.
+   */
+  const [refreshKey, setRefreshKey] = useState(0);
+  useAutoRefresh(() => setRefreshKey(key => key + 1));
 
   useEffect(() => {
     const run = async () => {
@@ -88,7 +101,7 @@ export default function GestionUtilisateurs() {
       setLoading(false);
     };
     run();
-  }, [router, page]);
+  }, [router, page, refreshKey]);
 
   const filtered = useMemo(() => {
     let list = users;
@@ -115,6 +128,7 @@ export default function GestionUtilisateurs() {
     } else {
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
       setMessage({ text: `Rôle mis à jour ✓`, type: 'success' });
+      await revalidateScope('admin-users');
     }
     setUpdating(null);
   };

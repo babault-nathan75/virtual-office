@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
 import { useDebounce } from '@/hooks/useDebounce';
 import { formatDate } from '@/lib/i18n';
+import { revalidateScope } from '@/lib/actions/cache';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh';
 
 type Mission = {
   id: number;
@@ -42,6 +44,17 @@ export default function RechercherPoste() {
   const [loadingAI, setLoadingAI] = useState(false);
 
   const debouncedQ = useDebounce(q, 300);
+
+  /*
+   * Rechargement automatique au retour sur l'onglet et après une reconnexion.
+   *
+   * L'écran ne se chargeait qu'au montage : un onglet laissé ouvert affichait
+   * indéfiniment un état périmé, et le seul recours était de recharger la page.
+   * Incrémenter cette clé rejoue l'effet de chargement existant — y compris sa
+   * vérification de session, ce qui est souhaitable après une longue absence.
+   */
+  const [refreshKey, setRefreshKey] = useState(0);
+  useAutoRefresh(() => setRefreshKey(key => key + 1));
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -80,7 +93,7 @@ export default function RechercherPoste() {
       setLoading(false);
     };
     fetchAll();
-  }, [router]);
+  }, [router, refreshKey]);
 
   // ----- Fetch scores IA pour les missions -----------------------------------
 
@@ -146,6 +159,10 @@ export default function RechercherPoste() {
     } else {
       setMesCandidatures(prev => [...prev, { mission_id: missionId }]);
       setMessage({ text: 'Candidature envoyée ✓', type: 'success' });
+      // La candidature apparaît sur les deux tableaux de bord : les caches des
+      // deux versants doivent expirer, sinon l'entreprise ne la verra pas
+      // arriver avant la fin de la fenêtre de cache.
+      await revalidateScope('candidatures');
     }
     setPostulating(null);
   };

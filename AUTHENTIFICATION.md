@@ -224,9 +224,11 @@ AUTH_SECRET=                       # openssl rand -base64 48 — 32 car. minimum
 NEXT_PUBLIC_SITE_URL=              # URL canonique
 NEXT_PUBLIC_TURNSTILE_SITE_KEY=
 TURNSTILE_SECRET_KEY=
-RESEND_API_KEY=                    # prioritaire s'il est renseigné
-MAIL_FROM=                         # requis par Resend (domaine vérifié)
-SMTP_USER=  SMTP_PASS=             # sinon : Gmail, mot de passe d'application
+BREVO_API_KEY=                     # prioritaire ; API HTTP, sans contrainte d'IP
+RESEND_API_KEY=                    # sinon
+SMTP_USER=  SMTP_PASS=             # sinon : relais SMTP
+SMTP_HOST=  SMTP_PORT=             # ex. smtp-relay.brevo.com:587
+MAIL_FROM=                         # OBLIGATOIRE hors Gmail — voir §11
 UPSTASH_REDIS_REST_URL=            # recommandé : sans lui le quota ne tient
 UPSTASH_REDIS_REST_TOKEN=          #   pas entre instances serverless
 ```
@@ -299,8 +301,55 @@ l'empreinte de tous les codes émis.
 
 | Point | Détail |
 |---|---|
-| Plafond SMTP Gmail | ~500 envois/jour. Avec un code à chaque connexion, atteint vers 150–200 utilisateurs actifs quotidiens — et ce sont alors les connexions qui cessent de fonctionner, pas seulement les notifications. La bascule est déjà câblée : renseigner `RESEND_API_KEY` et `MAIL_FROM` suffit, sans toucher au code (voir `lib/mailer.ts`). |
-| Délivrabilité | Les codes doivent arriver vite et hors spam. Configurer SPF, DKIM et DMARC sur le domaine d'envoi. |
+| Plafond SMTP Gmail | ~500 envois/jour. Avec les appareils de confiance (§3), le seuil recule d'environ un facteur dix. La bascule vers un fournisseur transactionnel reste câblée : `BREVO_API_KEY` ou `RESEND_API_KEY` suffit. |
+| Délivrabilité | Voir §11 — c'est le point qui décide du classement en indésirable, et il ne se règle pas en changeant de fournisseur. |
 | Taux d'abandon | Surveiller le rapport `login_password_ok` / `login_otp_ok` dans `auth_events` : l'écart mesure exactement la friction du second facteur. `login_trusted_device` donne la part des connexions dispensées. |
 | Perte d'un appareil | L'utilisateur doit révoquer depuis « Sécurité ». Sans cette action, la dispense court jusqu'à son terme. |
 | Durée de 30 jours | Réglable par `TRUST_DURATION_DAYS` dans `src/lib/trustedDevice.ts`. La raccourcir augmente le volume d'emails d'autant. |
+
+---
+
+## 11. Délivrabilité
+
+Changer de fournisseur ne sort pas des indésirables. Ce qui décide du
+classement, c'est **l'alignement DMARC** : l'adresse affichée dans « De : » doit
+appartenir à un domaine dont vous contrôlez le DNS, et que le fournisseur signe
+en DKIM.
+
+### Le piège
+
+Envoyer via Brevo « de la part de » `contact@gmail.com` :
+
+1. Gmail publie une politique DMARC stricte sur `gmail.com` ;
+2. l'email part des serveurs de Brevo, donc SPF et DKIM ne s'alignent pas avec
+   `gmail.com` ;
+3. le destinataire applique la politique de Gmail : **rejet ou indésirable**.
+
+Le résultat est *pire* qu'un envoi direct depuis Gmail. Il faut donc un domaine
+à vous. `secretariatpro-drab.vercel.app` ne convient pas non plus : le domaine
+`vercel.app` ne vous appartient pas, aucun enregistrement DNS n'y est ajoutable.
+
+### La marche à suivre
+
+1. Acquérir un domaine (`secretariatpro.ci`, `.com`…).
+2. Dans Brevo → **Expéditeurs, domaine, IP** → ajouter le domaine, puis créer
+   les enregistrements DNS proposés (SPF et DKIM, sélecteur `mail`).
+3. Ajouter une politique DMARC d'observation, sans risque de rejet :
+   `_dmarc.votre-domaine  TXT  "v=DMARC1; p=none; rua=mailto:postmaster@votre-domaine"`.
+4. Renseigner `MAIL_FROM="SecrétariatPro <no-reply@votre-domaine>"`.
+5. Vérifier : `npm run check:email`, puis un envoi réel avec
+   `npm run check:email -- --send vous@exemple.com`.
+6. Ouvrir le message reçu, afficher la source, et confirmer que l'en-tête
+   `Authentication-Results` indique `spf=pass`, `dkim=pass` et `dmarc=pass`.
+
+Passer plus tard `p=none` à `p=quarantine` une fois les rapports propres.
+
+### Brevo par SMTP ou par API ?
+
+Brevo peut restreindre l'usage des clés SMTP à une liste d'adresses IP
+autorisées. Les fonctions Vercel sortent par des adresses **dynamiques et non
+documentées** : la liste ne peut pas être tenue à jour, et l'envoi cassera sans
+prévenir — c'est-à-dire que les connexions cesseront de fonctionner.
+
+Utilisez donc `BREVO_API_KEY` (API HTTP, aucune contrainte d'IP), ou laissez la
+liste des IP autorisées vide.

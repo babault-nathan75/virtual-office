@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 
 import Link from '@/components/Link';
 import NotificationBell from '@/components/NotificationBell';
@@ -116,6 +116,7 @@ export default function Navbar() {
   const [userSpecialite, setUserSpecialite] = useState<string | null>(null);
 
   const pathname = usePathname();
+  const router = useRouter();
   const dropdownRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLElement>(null);
 
@@ -254,7 +255,17 @@ export default function Navbar() {
     await supabase.auth.signOut();
     setProfileOpen(false);
     setMobileOpen(false);
-    window.location.href = '/';
+    /*
+     * `router.replace` + `router.refresh` au lieu d'une affectation de
+     * `location.href`.
+     *
+     * Le rechargement complet reconstruisait toute l'application pour un
+     * changement d'état — et donnait cette page blanche d'une seconde à chaque
+     * déconnexion. `refresh()` suffit : il fait relire les cookies aux
+     * composants serveur, qui se rendent alors en état déconnecté.
+     */
+    router.replace('/?deconnexion=1');
+    router.refresh();
   };
 
   const metadata = user?.user_metadata as UserMetadata | undefined;

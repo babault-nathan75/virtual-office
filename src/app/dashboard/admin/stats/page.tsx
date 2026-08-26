@@ -7,6 +7,7 @@ import { Breadcrumbs } from '@/components/ui';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { exportToCSV, exportToPDF } from '@/lib/export';
 import { SkeletonStats } from '@/components/Skeleton';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh';
 
 type Stats = {
   totalMessages: number;
@@ -22,6 +23,17 @@ export default function AdminStatsPage() {
   const [loading, setLoading] = useState(true);
 
   useDocumentTitle('Statistiques');
+
+  /*
+   * Rechargement automatique au retour sur l'onglet et après une reconnexion.
+   *
+   * L'écran ne se chargeait qu'au montage : un onglet laissé ouvert affichait
+   * indéfiniment un état périmé, et le seul recours était de recharger la page.
+   * Incrémenter cette clé rejoue l'effet de chargement existant — y compris sa
+   * vérification de session, ce qui est souhaitable après une longue absence.
+   */
+  const [refreshKey, setRefreshKey] = useState(0);
+  useAutoRefresh(() => setRefreshKey(key => key + 1));
 
   useEffect(() => {
     const run = async () => {
@@ -85,7 +97,7 @@ export default function AdminStatsPage() {
       setLoading(false);
     };
     run();
-  }, [router]);
+  }, [router, refreshKey]);
 
   if (loading) return (
     <div className="min-h-screen bg-slate-50 p-8">

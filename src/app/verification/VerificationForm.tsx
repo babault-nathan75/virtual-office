@@ -172,7 +172,7 @@ export default function VerificationForm({ purpose, method, email, siteKey }: Pr
             <>
               Nous avons envoyé un code à {CODE_LENGTH} chiffres à{' '}
               <span className="font-semibold text-slate-800 break-all">{email}</span>. Il est
-              valable 10 minutes.
+              valable 10 minutes. (Vérifier vos spams/indésirables si vous ne voyez pas)
             </>
           )}
         </p>

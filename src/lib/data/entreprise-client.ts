@@ -1,6 +1,7 @@
 'use client';
 
 import { createBrowserClient } from '@supabase/ssr';
+import { revalidateScope } from '@/lib/actions/cache';
 
 function getSupabase() {
   return createBrowserClient(
@@ -52,11 +53,15 @@ export async function proposerOffreAction(candidatureId: number, secretaireId: s
   if (offErr) return { error: { message: offErr.message, code: offErr.code } as ActionError };
 
   const { error: updErr } = await supabase.from('candidatures').update({ statut: 'acceptee' }).eq('id', candidatureId);
+  // Le tableau de bord de l'entreprise ET celui de la secrétaire affichent
+  // cette candidature : les deux caches doivent expirer.
+  if (!updErr) await revalidateScope('candidatures');
   return { error: updErr ? { message: updErr.message, code: updErr.code } as ActionError : null };
 }
 
 export async function refuserCandidatureAction(missionId: number, candidatureId: number) {
   const supabase = getSupabase();
   const { error } = await supabase.from('candidatures').update({ statut: 'refusee' }).eq('id', candidatureId);
+  if (!error) await revalidateScope('candidatures');
   return { error: error ? { message: error.message, code: error.code } as ActionError : null };
 }

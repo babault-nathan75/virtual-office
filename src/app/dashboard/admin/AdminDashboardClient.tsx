@@ -1,14 +1,13 @@
 'use client';
 
 import { useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { toast } from '@/components/Toast';
 import NotificationBell from '@/components/NotificationBell';
 import Link from '@/components/Link';
-import {
-  approveKycAction,
-  rejectKycAction,
-  AdminDashboardData
-} from '@/lib/data/admin-client';
+import type { AdminDashboardData } from '@/lib/data/admin-client';
+import { decideKyc } from '@/lib/actions/adminKyc';
+import RefreshOnReturn from '@/components/RefreshOnReturn';
 
 type Props = {
   userId: string;
@@ -17,28 +16,45 @@ type Props = {
 };
 
 export default function AdminDashboardClient({ userId, userName, stats }: Props) {
+  const router = useRouter();
   // `showUsers`/`showKyc` et `handleRoleChange` n'étaient rattachés à aucun
   // rendu : le changement de rôle se fait depuis /dashboard/admin/utilisateurs.
-  const handleKycApprove = useCallback(async (targetUserId: string) => {
-    const result = await approveKycAction(targetUserId);
-    if (result.error) toast.error(result.error.message);
-    else {
-      toast.success('KYC approuvé');
-      window.location.reload();
-    }
-  }, []);
+  /*
+   * `router.refresh()` plutôt que `window.location.reload()` : le rechargement
+   * complet ne servait à rien puisque le cache serveur, jamais invalidé,
+   * renvoyait la même liste. L'action serveur invalide maintenant l'étiquette
+   * `admin-dashboard`, et `refresh()` va rechercher les données à jour sans
+   * repartir d'une page blanche.
+   */
+  const decide = useCallback(
+    async (targetUserId: string, decision: 'approved' | 'rejected') => {
+      const result = await decideKyc({ userId: targetUserId, decision });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(decision === 'approved' ? 'Dossier approuvé' : 'Dossier refusé');
+      router.refresh();
+    },
+    [router]
+  );
 
-  const handleKycReject = useCallback(async (targetUserId: string) => {
-    const result = await rejectKycAction(targetUserId);
-    if (result.error) toast.error(result.error.message);
-    else {
-      toast.success('KYC refusé');
-      window.location.reload();
-    }
-  }, []);
+  const handleKycApprove = useCallback(
+    (targetUserId: string) => decide(targetUserId, 'approved'),
+    [decide]
+  );
+
+  const handleKycReject = useCallback(
+    (targetUserId: string) => decide(targetUserId, 'rejected'),
+    [decide]
+  );
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8">
+
+    {/* Remet l'écran à jour au retour sur l'onglet, sans rechargement. */}
+
+    <RefreshOnReturn />
       <div className="max-w-7xl mx-auto space-y-8">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div className="flex items-center gap-4">

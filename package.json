@@ -12,6 +12,7 @@
     "test:e2e": "playwright test",
     "db:migrate": "node scripts/migrate.mjs",
     "check:turnstile": "node scripts/check-turnstile.mjs",
+    "check:email": "node scripts/check-email.mjs",
     "analyze": "ANALYZE=true npm run build"
   },
   "dependencies": {
