@@ -41,12 +41,12 @@ export async function POST(request: Request) {
   const ip = getClientIp(request);
   const userAgent = request.headers.get('user-agent');
 
-  const rate = await checkRateLimit(`login:${ip}`, 10, 5 * 60_000);
+  const rate = await checkRateLimit(`login:${ip}`, 6, 10 * 60_000);
   if (!rate.allowed) {
     await logAuthEvent({ event: 'rate_limited', ipAddress: ip, userAgent });
     return NextResponse.json(
-      { error: 'Trop de tentatives de connexion. Réessayez dans quelques minutes.' },
-      { status: 429, headers: { 'Retry-After': '300' } }
+      { error: 'Trop de tentatives de connexion. Réessayez dans 10 minutes.' },
+      { status: 429, headers: { 'Retry-After': '600' } }
     );
   }
 

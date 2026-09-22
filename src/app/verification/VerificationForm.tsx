@@ -53,6 +53,7 @@ export default function VerificationForm({ purpose, method, email, siteKey }: Pr
   const [resending, setResending] = useState(false);
   const [captchaToken, setCaptchaToken] = useState('');
   const [captchaReset, setCaptchaReset] = useState(0);
+  const [showAlert, setShowAlert] = useState(true);
   /*
    * Coché par défaut : c'est le cas courant, et laisser l'utilisateur ressaisir
    * un code à chaque connexion est précisément ce que ce changement supprime.
@@ -177,6 +178,34 @@ export default function VerificationForm({ purpose, method, email, siteKey }: Pr
           )}
         </p>
       </header>
+
+      {showAlert && (
+        <div className="mb-6 p-4 rounded-xl bg-blue-50 border border-blue-200 text-sm text-blue-800" role="alert">
+          <div className="flex items-start gap-3">
+            <svg className="w-5 h-5 mt-0.5 flex-shrink-0 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+              <p className="font-semibold mb-1">
+                {isTotp ? 'Code envoyé sur Google Authenticator' : 'Code envoyé par email'}
+              </p>
+              <p>
+                {isTotp
+                  ? 'Ouvrez l\'application Google Authenticator et saisissez le code à 6 chiffres affiché pour SecrétariatPro.'
+                  : `Un code à ${CODE_LENGTH} chiffres a été envoyé à ${email}. Il est valable 10 minutes. Si vous ne le trouvez pas, vérifiez vos spams/courriers indésirables, puis actualisez cette page.`}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAlert(false)}
+              className="ml-auto flex-shrink-0 text-blue-500 hover:text-blue-700 font-bold text-lg leading-none px-2"
+              aria-label="Fermer l'alerte"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && <AuthAlert type="error">{error}</AuthAlert>}
       {notice && !error && <AuthAlert type="success">{notice}</AuthAlert>}

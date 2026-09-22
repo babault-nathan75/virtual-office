@@ -80,6 +80,7 @@ type Secretaire = {
   soft_skills?: string[] | null;
   competences?: string[] | null;
   annees_experience?: number | null;
+  cv_url?: string | null;
 };
 
 type Filters = {
@@ -91,6 +92,7 @@ type Filters = {
   specialite: string;
   ville: string;
   experienceMin: number;
+  cvOnly: boolean;
 };
 
 const INITIAL_FILTERS: Filters = {
@@ -102,6 +104,7 @@ const INITIAL_FILTERS: Filters = {
   specialite: '',
   ville: '',
   experienceMin: 0,
+  cvOnly: false,
 };
 
 // ============================================================
@@ -178,6 +181,11 @@ function scoreSecretaire(s: Secretaire, f: Filters) {
   if (f.experienceMin > 0) {
     max += 10;
     if ((s.annees_experience ?? 0) >= f.experienceMin) score += 10;
+  }
+
+  if (f.cvOnly) {
+    max += 10;
+    if (s.cv_url) score += 10;
   }
 
   // 8. Bonus qualité du profil — toujours compté (max +10)
@@ -295,7 +303,7 @@ export default function ChercherSecretaire() {
       // Données métier
       const { data: metiers } = await supabase
         .from('profils_secretaires')
-        .select('id, photo_url, bio, ville, disponibilite, niveau_etudes, specialite, langues, outils, soft_skills, competences, annees_experience')
+        .select('id, photo_url, bio, ville, disponibilite, niveau_etudes, specialite, langues, outils, soft_skills, competences, annees_experience, cv_url')
         .in('id', visibleIds.length > 0 ? visibleIds : ['__none__']);
 
       // Filtrer uniquement les profils 100% complets
@@ -375,6 +383,7 @@ export default function ChercherSecretaire() {
           isAI: !!ai,
         };
       })
+      .filter(s => !filters.cvOnly || Boolean(s.cv_url))
       .sort((a, b) => b.score - a.score);
   }, [secretaires, filters, debouncedQ, useAI, aiScores]);
 
@@ -385,7 +394,8 @@ export default function ChercherSecretaire() {
     (filters.disponibilite ? 1 : 0) +
     (filters.niveauEtudes ? 1 : 0) +
     (filters.ville ? 1 : 0) +
-    (filters.experienceMin > 0 ? 1 : 0);
+    (filters.experienceMin > 0 ? 1 : 0) +
+    (filters.cvOnly ? 1 : 0);
 
   if (loading) {
     return (
@@ -471,6 +481,18 @@ export default function ChercherSecretaire() {
 
           {/* ============== FILTRES ============== */}
           <aside className="lg:sticky lg:top-4 lg:self-start space-y-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:pr-2">
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-100">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filters.cvOnly}
+                  onChange={e => setFilters(f => ({ ...f, cvOnly: e.target.checked }))}
+                  className="h-4 w-4 accent-blue-600"
+                />
+                <span className="text-sm font-bold text-slate-700">CV disponible uniquement</span>
+              </label>
+            </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-100">
               <label className="block text-xs font-black uppercase tracking-widest text-slate-500 mb-2">
@@ -783,6 +805,16 @@ function ProfileModal({ s, onClose }: { s: Secretaire; onClose: () => void }) {
           )}
           {(s.langues?.length ?? 0) > 0 && (
             <ChipsBlock label="Langues" items={s.langues!} color="amber" />
+          )}
+          {s.cv_url && (
+            <a
+              href={s.cv_url}
+              target="_blank"
+              rel="noreferrer"
+              className="block w-full rounded-xl bg-slate-900 px-4 py-3 text-center text-sm font-bold text-white hover:bg-blue-700 transition"
+            >
+              Consulter le CV
+            </a>
           )}
 
           <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">

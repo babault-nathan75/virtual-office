@@ -18,6 +18,7 @@ type Profil = {
   role: 'entreprise' | 'secretaire' | 'admin';
   created_at: string;
   specialite?: string | null;
+  cvUrl?: string | null;
 };
 
 const ROLES: Profil['role'][] = ['entreprise', 'secretaire', 'admin'];
@@ -36,6 +37,9 @@ export default function GestionUtilisateurs() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<'all' | Profil['role']>('all');
+  const [cvFilter, setCvFilter] = useState<'all' | 'with' | 'without'>('all');
+  const [sortBy, setSortBy] = useState<'nom' | 'email' | 'telephone' | 'role' | 'created_at'>('nom');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [updating, setUpdating] = useState<string | null>(null);
   const [message, setMessage] = useState({ text: '', type: '' });
   const [page, setPage] = useState(0);
@@ -78,43 +82,51 @@ export default function GestionUtilisateurs() {
       const { data, count } = await supabase
         .from('profils')
         .select('id, nom, email, telephone, role, created_at', { count: 'exact' })
-        .order('created_at', { ascending: false })
+        .order(sortBy, { ascending: sortOrder === 'asc', nullsFirst: false })
         .range(from, to);
 
-      // Récupérer les spécialités séparément
+      // Récupérer les spécialités et CV séparément
       const userIds = (data ?? []).map(u => u.id);
       const { data: secData } = await supabase
         .from('profils_secretaires')
-        .select('id, specialite')
+        .select('id, specialite, cv_url')
         .in('id', userIds.length > 0 ? userIds : ['__none__']);
 
-      const specMap = new Map((secData ?? []).map(s => [s.id, s.specialite]));
+      const specMap = new Map((secData ?? []).map(s => [s.id, { specialite: s.specialite, cvUrl: s.cv_url }]));
 
       if (data) {
-        const enriched = data.map(u => ({
-          ...u,
-          specialite: specMap.get(u.id) ?? null,
-        }));
+        const enriched = data.map(u => {
+          const sec = specMap.get(u.id);
+          return {
+            ...u,
+            specialite: sec?.specialite ?? null,
+            cvUrl: sec?.cvUrl ?? null,
+          };
+        });
         setUsers(enriched as Profil[]);
       }
       if (count !== null) setTotal(count);
       setLoading(false);
     };
     run();
-  }, [router, page, refreshKey]);
+  }, [router, page, refreshKey, sortBy, sortOrder]);
 
   const filtered = useMemo(() => {
     let list = users;
     if (filter !== 'all') list = list.filter(u => u.role === filter);
+    if (cvFilter !== 'all') {
+      list = list.filter(u => cvFilter === 'with' ? !!u.cvUrl : !u.cvUrl);
+    }
     if (q.trim()) {
       const needle = q.toLowerCase().trim();
       list = list.filter(u =>
         (u.nom ?? '').toLowerCase().includes(needle) ||
-        (u.email ?? '').toLowerCase().includes(needle)
+        (u.email ?? '').toLowerCase().includes(needle) ||
+        (u.telephone ?? '').toLowerCase().includes(needle)
       );
     }
     return list;
-  }, [users, filter, q]);
+  }, [users, filter, cvFilter, q]);
 
   // Les confirmations natives (`window.confirm`) bloquent le rendu, ne sont pas
   // stylables et sont ignorables dans certains navigateurs mobiles. Le dialogue
@@ -138,10 +150,18 @@ export default function GestionUtilisateurs() {
     setMessage({ text: '', type: '' });
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setMessage({ text: 'Session expirée. Veuillez vous reconnecter.', type: 'error' });
+        return;
+      }
       // Note : Vous devrez créer cette route d'API utilisant supabase-admin (Service Role Key)
       const response = await fetch('/api/admin/delete-user', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session?.access_token ?? ''}`,
+        },
         body: JSON.stringify({ userId }),
       });
       
@@ -235,7 +255,7 @@ export default function GestionUtilisateurs() {
             type="text"
             value={q}
             onChange={e => setQ(e.target.value)}
-            placeholder="Rechercher par nom ou email…"
+            placeholder="Rechercher par nom, email ou téléphone…"
             className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
           />
           <div className="flex gap-2 flex-wrap">
@@ -254,6 +274,34 @@ export default function GestionUtilisateurs() {
               </button>
             ))}
           </div>
+          <select
+            value={cvFilter}
+            onChange={e => setCvFilter(e.target.value as 'all' | 'with' | 'without')}
+            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+          >
+            <option value="all">CV : Tous</option>
+            <option value="with">CV : Avec</option>
+            <option value="without">CV : Sans</option>
+          </select>
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value as typeof sortBy)}
+            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+          >
+            <option value="nom">Trier : Nom</option>
+            <option value="email">Trier : Email</option>
+            <option value="telephone">Trier : Téléphone</option>
+            <option value="role">Trier : Rôle</option>
+            <option value="created_at">Trier : Date inscription</option>
+          </select>
+          <button
+            type="button"
+            onClick={() => setSortOrder(o => o === 'asc' ? 'desc' : 'asc')}
+            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+            title="Inverser l'ordre"
+          >
+            {sortOrder === 'asc' ? '↑ A-Z' : '↓ Z-A'}
+          </button>
         </div>
 
         {filtered.length === 0 ? (
@@ -268,6 +316,7 @@ export default function GestionUtilisateurs() {
                   <tr>
                     <th className="px-4 py-3 font-black text-[10px] uppercase tracking-widest text-slate-500">Utilisateur</th>
                     <th className="px-4 py-3 font-black text-[10px] uppercase tracking-widest text-slate-500 hidden md:table-cell">Téléphone</th>
+                    <th className="px-4 py-3 font-black text-[10px] uppercase tracking-widest text-slate-500 hidden lg:table-cell">CV</th>
                     <th className="px-4 py-3 font-black text-[10px] uppercase tracking-widest text-slate-500 hidden lg:table-cell">Inscrit le</th>
                     <th className="px-4 py-3 font-black text-[10px] uppercase tracking-widest text-slate-500">Rôle</th>
                     <th className="px-4 py-3 font-black text-[10px] uppercase tracking-widest text-slate-500 text-right">Actions</th>
@@ -292,6 +341,13 @@ export default function GestionUtilisateurs() {
                           <div className="text-xs text-slate-500 truncate max-w-[240px]">{u.email}</div>
                         </td>
                         <td className="px-4 py-3 text-slate-600 hidden md:table-cell">{u.telephone || '—'}</td>
+                        <td className="px-4 py-3 text-slate-500 text-xs hidden lg:table-cell">
+                          {u.cvUrl ? (
+                            <a href={u.cvUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline font-medium">✓ CV</a>
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-slate-500 text-xs hidden lg:table-cell">
                           {formatDate(u.created_at)}
                         </td>

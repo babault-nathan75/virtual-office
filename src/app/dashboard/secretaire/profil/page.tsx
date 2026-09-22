@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
@@ -65,6 +65,87 @@ const SPECIALITES_SECRETAIRE = [
 // ============================================================
 // Petits helpers d'UI
 // ============================================================
+
+function DropZone({
+  onFile,
+  accept,
+  maxSize,
+  label,
+  children,
+}: {
+  onFile: (file: File) => void;
+  accept: string;
+  maxSize: number;
+  label: string;
+  children?: React.ReactNode;
+}) {
+  const [dragActive, setDragActive] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') setDragActive(true);
+    else if (e.type === 'dragleave') setDragActive(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  };
+
+  const handleClick = () => inputRef.current?.click();
+
+  const handleFile = (file: File) => {
+    if (file.size > maxSize) {
+      alert(`Fichier trop volumineux (max ${maxSize / (1024 * 1024)} Mo)`);
+      return;
+    }
+    if (!file.type.match(accept.replace(/\*/g, '.*'))) {
+      alert('Type de fichier non autorisé');
+      return;
+    }
+    onFile(file);
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleFile(file);
+    e.target.value = '';
+  };
+
+  return (
+    <div
+      onDragEnter={handleDrag}
+      onDragLeave={handleDrag}
+      onDragOver={handleDrag}
+      onDrop={handleDrop}
+      onClick={handleClick}
+      className={`relative border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer ${
+        dragActive ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-400 hover:bg-slate-50'
+      }`}
+    >
+      <input
+        type="file"
+        ref={inputRef}
+        accept={accept}
+        hidden
+        onChange={handleChange}
+      />
+      <div className="flex flex-col items-center gap-2">
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl">
+          {dragActive ? '📥' : '📄'}
+        </div>
+        <p className="font-medium text-slate-700">{label}</p>
+        <p className="text-xs text-slate-400">Cliquez ou glissez-déposez</p>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 function ChipMultiSelect({
   options, selected, onChange, color = 'blue',
@@ -154,6 +235,8 @@ export default function ProfilSecretaire() {
   const [photoUrl, setPhotoUrl] = useState('');
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [cvUrl, setCvUrl] = useState('');
+  const [uploadingCv, setUploadingCv] = useState(false);
 
   // Profil
   const [bio, setBio] = useState('');
@@ -184,6 +267,7 @@ export default function ProfilSecretaire() {
 
       if (data) {
         setPhotoUrl(data.photo_url ?? '');
+        setCvUrl(data.cv_url ?? '');
         setBio(data.bio ?? '');
         setVille(data.ville ?? '');
         setDisponibilite(data.disponibilite ?? '');
@@ -199,6 +283,54 @@ export default function ProfilSecretaire() {
     };
     fetchProfil();
   }, [router]);
+
+  const handleCvSelected = useCallback(async (file: File) => {
+    if (!userId) return;
+    const allowed = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    if (!allowed.includes(file.type) || file.size > 10 * 1024 * 1024) {
+      setMessage({ text: 'CV invalide : PDF ou Word, 10 Mo maximum.', type: 'error' });
+      return;
+    }
+    setUploadingCv(true);
+    setMessage({ text: '', type: '' });
+    try {
+      const ext = (file.name.split('.').pop() || 'pdf').toLowerCase();
+      const path = `${userId}/cv.${ext}`;
+      const { error } = await supabase.storage.from('cv').upload(path, file, { upsert: true, contentType: file.type });
+      if (error) throw error;
+      const { data: { publicUrl } } = supabase.storage.from('cv').getPublicUrl(path);
+      const { error: dbError } = await supabase.from('profils_secretaires').upsert({ id: userId, cv_url: `${publicUrl}?v=${Date.now()}` });
+      if (dbError) throw dbError;
+      setCvUrl(`${publicUrl}?v=${Date.now()}`);
+      setMessage({ text: 'CV ajouté à votre profil ✓', type: 'success' });
+    } catch (error) {
+      setMessage({ text: `Erreur upload CV : ${error instanceof Error ? error.message : String(error)}`, type: 'error' });
+    } finally {
+      setUploadingCv(false);
+    }
+  }, [userId]);
+
+  const handleRemoveCv = useCallback(async () => {
+    if (!userId) return;
+    setUploadingCv(true);
+    setMessage({ text: '', type: '' });
+    try {
+      // Delete from storage
+      const { data: files } = await supabase.storage.from('cv').list(userId);
+      if (files && files.length) {
+        await supabase.storage.from('cv').remove(files.map(f => `${userId}/${f.name}`));
+      }
+      // Remove from database
+      const { error } = await supabase.from('profils_secretaires').update({ cv_url: null }).eq('id', userId);
+      if (error) throw error;
+      setCvUrl('');
+      setMessage({ text: 'CV retiré ✓', type: 'success' });
+    } catch (error) {
+      setMessage({ text: `Erreur : ${error instanceof Error ? error.message : String(error)}`, type: 'error' });
+    } finally {
+      setUploadingCv(false);
+    }
+  }, [userId]);
 
   // ----- Upload photo --------------------------------------------------------
 
@@ -276,6 +408,7 @@ export default function ProfilSecretaire() {
     const { error } = await supabase.from('profils_secretaires').upsert({
       id: userId,
       photo_url: photoUrl || null,
+      cv_url: cvUrl || null,
       bio: bio || null,
       ville: ville || null,
       disponibilite: disponibilite || null,
@@ -439,6 +572,54 @@ export default function ProfilSecretaire() {
                     ))}
                   </select>
                 </div>
+              </section>
+
+              <hr className="border-slate-100" />
+
+              <section className="space-y-4">
+                <h2 className="text-lg font-black tracking-tight text-slate-900 flex items-center gap-3">
+                  <span className="bg-blue-100 text-blue-700 w-8 h-8 rounded-xl flex items-center justify-center text-sm">3</span>
+                  CV
+                </h2>
+                <p className="text-sm text-slate-500">Ajoutez votre CV pour être trouvée par les entreprises qui le recherchent.</p>
+                {cvUrl ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-xl bg-red-100 flex items-center justify-center text-xl">📄</div>
+                        <div>
+                          <p className="font-medium text-slate-900">CV actuel</p>
+                          <p className="text-sm text-slate-500">PDF / Word — Prêt à être consulté par les entreprises</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <a href={cvUrl} target="_blank" rel="noreferrer" className="text-sm font-bold text-blue-600 hover:underline">Voir le CV</a>
+                        <button
+                          type="button"
+                          onClick={handleRemoveCv}
+                          disabled={uploadingCv}
+                          className="px-3 py-1.5 text-sm font-bold text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50"
+                        >
+                          Retirer
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-400">Vous pouvez uploader un nouveau CV pour le remplacer.</p>
+                    <DropZone
+                      onFile={handleCvSelected}
+                      accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      maxSize={10 * 1024 * 1024}
+                      label="Nouveau CV (PDF ou Word, max 10 Mo)"
+                    />
+                  </div>
+                ) : (
+                  <DropZone
+                    onFile={handleCvSelected}
+                    accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    maxSize={10 * 1024 * 1024}
+                    label="Uploader votre CV (PDF ou Word, max 10 Mo)"
+                  />
+                )}
               </section>
 
               <hr className="border-slate-100" />

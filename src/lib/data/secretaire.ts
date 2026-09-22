@@ -147,7 +147,10 @@ export function computeProfileCompletion(
   let score = 0;
   if (!profil) return (kycApproved ? SCORE_WEIGHTS.kyc : 0) + (twoFactorEnabled ? SCORE_WEIGHTS.twoFactor : 0);
 
-  if (profil.photo_url) score += SCORE_WEIGHTS.photo_url;
+  // Photo is mandatory for 100% - if missing, cap at 90
+  const hasPhoto = !!profil.photo_url;
+  if (hasPhoto) score += SCORE_WEIGHTS.photo_url;
+  
   if (Array.isArray(profil.competences) && profil.competences.length > 0) score += SCORE_WEIGHTS.competences;
   if (Array.isArray(profil.outils) && profil.outils.length > 0) score += SCORE_WEIGHTS.outils;
   if (typeof profil.annees_experience === 'number' && profil.annees_experience > 0) score += SCORE_WEIGHTS.annees_experience;
@@ -161,5 +164,6 @@ export function computeProfileCompletion(
   if (kycApproved) score += SCORE_WEIGHTS.kyc;
   if (twoFactorEnabled) score += SCORE_WEIGHTS.twoFactor;
 
-  return Math.min(score, 100);
+  // Cap at 90 if no photo (mandatory for 100%)
+  return Math.min(score, hasPhoto ? 100 : 90);
 }

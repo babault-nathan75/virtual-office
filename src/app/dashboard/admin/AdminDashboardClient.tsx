@@ -1,13 +1,15 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from '@/components/Toast';
 import NotificationBell from '@/components/NotificationBell';
 import Link from '@/components/Link';
+import { Button } from '@/components/ui';
 import type { AdminDashboardData } from '@/lib/data/admin-client';
 import { decideKyc } from '@/lib/actions/adminKyc';
 import RefreshOnReturn from '@/components/RefreshOnReturn';
+import { supabase } from '@/lib/supabaseClient';
 
 type Props = {
   userId: string;
@@ -17,6 +19,13 @@ type Props = {
 
 export default function AdminDashboardClient({ userId, userName, stats }: Props) {
   const router = useRouter();
+  const [bulkEmailOpen, setBulkEmailOpen] = useState(false);
+  const [bulkEmailLoading, setBulkEmailLoading] = useState(false);
+  const [bulkEmailSubject, setBulkEmailSubject] = useState('');
+  const [bulkEmailHtml, setBulkEmailHtml] = useState('');
+  const [bulkEmailFilter, setBulkEmailFilter] = useState<'all' | 'incomplete'>('all');
+  const [bulkEmailPreview, setBulkEmailPreview] = useState(false);
+
   // `showUsers`/`showKyc` et `handleRoleChange` n'étaient rattachés à aucun
   // rendu : le changement de rôle se fait depuis /dashboard/admin/utilisateurs.
   /*
@@ -49,12 +58,58 @@ export default function AdminDashboardClient({ userId, userName, stats }: Props)
     [decide]
   );
 
-  return (
+  const handleBulkEmailSend = async () => {
+    if (!bulkEmailSubject.trim() || !bulkEmailHtml.trim()) {
+      toast.error('Sujet et contenu sont obligatoires');
+      return;
+    }
+
+    setBulkEmailLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast.error('Session expirée');
+        return;
+      }
+
+      const response = await fetch('/api/admin/bulk-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          subject: bulkEmailSubject,
+          html: bulkEmailHtml,
+          filter: {
+            role: 'secretaire',
+            incompleteOnly: bulkEmailFilter === 'incomplete',
+          },
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        toast.error(result.error ?? 'Erreur lors de l\'envoi');
+        return;
+      }
+
+      toast.success(`${result.sent} email(s) envoyé(s)${result.failed ? `, ${result.failed} échec(s)` : ''}`);
+      setBulkEmailOpen(false);
+      setBulkEmailSubject('');
+      setBulkEmailHtml('');
+      setBulkEmailFilter('all');
+    } catch {
+      toast.error('Erreur réseau');
+    } finally {
+      setBulkEmailLoading(false);
+    }
+  };
+
+return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-
-    {/* Remet l'écran à jour au retour sur l'onglet, sans rechargement. */}
-
-    <RefreshOnReturn />
+      <RefreshOnReturn />
       <div className="max-w-7xl mx-auto space-y-8">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div className="flex items-center gap-4">
@@ -183,6 +238,107 @@ export default function AdminDashboardClient({ userId, userName, stats }: Props)
             <p className="text-sm text-slate-500 mt-1">Rôles, stats, export</p>
           </Link>
         </div>
+
+        {/* Envoi email groupé aux secrétaires */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 border-l-4 border-l-purple-500">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold text-lg text-slate-900">📧 Email groupé aux secrétaires</h3>
+            <span className="text-sm text-slate-500">{stats.stats.totalSecretaires} secrétaire{stats.stats.totalSecretaires > 1 ? 's' : ''} inscrit{stats.stats.totalSecretaires > 1 ? 'es' : ''}</span>
+          </div>
+          <p className="text-sm text-slate-500 mb-4">
+            Envoyez une communication à toutes les secrétaires (ex: rappel de compléter leur profil).
+          </p>
+          <Button variant="secondary" onClick={() => setBulkEmailOpen(true)} className="w-full sm:w-auto">
+            Rédiger un email groupé
+          </Button>
+        </div>
+
+      {/* Modal Email Groupé */}
+      {bulkEmailOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setBulkEmailOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-slate-900">Nouvel email groupé</h2>
+              <button onClick={() => setBulkEmailOpen(false)} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">×</button>
+            </div>
+            <div className="p-6 overflow-y-auto space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1.5">Destinataires</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="bulk-filter"
+                      value="all"
+                      checked={bulkEmailFilter === 'all'}
+                      onChange={() => setBulkEmailFilter('all')}
+                      className="text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium text-slate-700">Toutes les secrétaires ({stats.stats.totalSecretaires})</span>
+                  </label>
+                </div>
+                <div className="flex gap-4 mt-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="bulk-filter"
+                      value="incomplete"
+                      checked={bulkEmailFilter === 'incomplete'}
+                      onChange={() => setBulkEmailFilter('incomplete')}
+                      className="text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium text-slate-700">Profil incomplet seulement</span>
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1.5">Sujet <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  value={bulkEmailSubject}
+                  onChange={e => setBulkEmailSubject(e.target.value)}
+                  placeholder="Ex: Complétez votre profil à 100%"
+                  className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none transition focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1.5">Contenu HTML <span className="text-red-500">*</span></label>
+                <textarea
+                  value={bulkEmailHtml}
+                  onChange={e => setBulkEmailHtml(e.target.value)}
+                  rows={10}
+                  placeholder="Utilisez {{nom}} pour personnaliser avec le prénom de la secrétaire."
+                  className="font-mono text-sm w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 focus:bg-white transition-all duration-200 text-slate-900 min-h-[44px] placeholder:text-slate-400"
+                />
+                <p className="text-xs text-slate-400 mt-1">Variable disponible : <code className="bg-slate-100 px-1 rounded">{'{{nom}}'}</code></p>
+              </div>
+
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={() => setBulkEmailPreview(!bulkEmailPreview)} size="sm">
+                  {bulkEmailPreview ? 'Masquer l\'aperçu' : 'Aperçu'}
+                </Button>
+                <Button variant="secondary" onClick={() => setBulkEmailOpen(false)} size="sm">
+                  Annuler
+                </Button>
+                <Button onClick={handleBulkEmailSend} loading={bulkEmailLoading} size="sm" className="ml-auto">
+                  Envoyer
+                </Button>
+              </div>
+            </div>
+
+            {bulkEmailPreview && bulkEmailHtml && (
+              <div className="border-t border-slate-100 p-6 bg-slate-50">
+                <h3 className="font-bold text-sm text-slate-700 mb-3">Aperçu (avec {'{{nom}}'} = “Marie”)</h3>
+                <div className="bg-white p-4 rounded-xl border border-slate-200 max-h-60 overflow-auto">
+                  <div dangerouslySetInnerHTML={{ __html: bulkEmailHtml.replace(/\{\{nom\}\}/g, 'Marie') }} />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );

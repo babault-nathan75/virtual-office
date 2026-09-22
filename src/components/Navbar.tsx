@@ -194,6 +194,11 @@ export default function Navbar() {
 
     void hydrateSession();
 
+    // Fallback: force isLoading to false after 3s to prevent stuck loading state
+    const fallbackTimer = setTimeout(() => {
+      if (!cancelled) setIsLoading(false);
+    }, 3000);
+
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -214,6 +219,7 @@ export default function Navbar() {
     return () => {
       cancelled = true;
       subscription.unsubscribe();
+      clearTimeout(fallbackTimer);
     };
   }, []);
 
