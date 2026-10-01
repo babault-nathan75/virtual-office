@@ -1,5 +1,6 @@
 import { getSiteUrl } from '@/lib/env';
 import { COUNTRY_CODE, COUNTRY_NAME, LOCALE } from '@/lib/i18n';
+import { SITE_CONTACT_PHONE } from '@/lib/constants';
 
 /**
  * Données structurées schema.org.
@@ -39,6 +40,7 @@ export function OrganizationJsonLd() {
         contactPoint: {
           '@type': 'ContactPoint',
           contactType: 'customer service',
+          telephone: SITE_CONTACT_PHONE.replace(/\s/g, ''),
           availableLanguage: ['French', 'English'],
         },
         // Le pays déclaré était « FR ». Les constantes du produit (langues

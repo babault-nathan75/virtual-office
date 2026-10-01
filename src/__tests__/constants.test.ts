@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { OUTILS, LANGUES, NIVEAUX, DISPOS, DISPO_LABEL, SOFT_SKILLS, SPECIALITES_SECRETAIRE } from '@/lib/constants';
+import { OUTILS, LANGUES, NIVEAUX, DISPOS, DISPO_LABEL, SOFT_SKILLS, SPECIALITES_SECRETAIRE, SITE_CONTACT_PHONE } from '@/lib/constants';
+
+describe('SITE_CONTACT_PHONE', () => {
+  it('contains the current SecrétariatPro contact number', () => {
+    expect(SITE_CONTACT_PHONE.replace(/\s/g, '')).toBe('+2250711505400');
+  });
+});
 
 describe('OUTILS', () => {
   it('contains essential tools', () => {

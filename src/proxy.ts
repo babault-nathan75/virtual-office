@@ -269,6 +269,6 @@ async function proxyHandler(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|html|ico|webmanifest|txt|xml|json|js|css|woff|woff2|ttf|eot)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|jfif|gif|webp|avif|html|ico|webmanifest|txt|xml|json|js|css|woff|woff2|ttf|eot)$).*)',
   ],
 };

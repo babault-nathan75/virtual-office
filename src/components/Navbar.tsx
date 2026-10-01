@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { usePathname, useRouter } from 'next/navigation';
@@ -114,6 +115,7 @@ export default function Navbar() {
   // désynchroniserait le rendu client du rendu serveur.
   const [userRole, setUserRole] = useState<UserRole>('entreprise');
   const [userSpecialite, setUserSpecialite] = useState<string | null>(null);
+  const [showOctoberRoseRibbon, setShowOctoberRoseRibbon] = useState(false);
 
   const pathname = usePathname();
   const router = useRouter();
@@ -252,6 +254,28 @@ export default function Navbar() {
   }, []);
 
   useEffect(() => {
+    let midnightTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const updateCampaignRibbon = () => {
+      if (midnightTimer) clearTimeout(midnightTimer);
+      const now = new Date();
+      setShowOctoberRoseRibbon(now.getMonth() === 9);
+      const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      midnightTimer = setTimeout(
+        updateCampaignRibbon,
+        Math.max(1, nextMidnight.getTime() - now.getTime()),
+      );
+    };
+
+    updateCampaignRibbon();
+    document.addEventListener('visibilitychange', updateCampaignRibbon);
+    return () => {
+      if (midnightTimer) clearTimeout(midnightTimer);
+      document.removeEventListener('visibilitychange', updateCampaignRibbon);
+    };
+  }, []);
+
+  useEffect(() => {
     setProfileOpen(false);
     setMobileOpen(false);
   }, [pathname]);
@@ -344,7 +368,7 @@ export default function Navbar() {
         <Link
           href="/"
           aria-label="Accueil SecrétariatPro"
-          className="group inline-flex shrink-0 items-center gap-2.5 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+          className="group inline-flex shrink-0 items-center gap-1.5 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 sm:gap-2"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -354,9 +378,18 @@ export default function Navbar() {
             height={42}
             className="h-10 w-10 object-contain transition-transform duration-200 group-hover:scale-[1.03]"
           />
-          <span className="hidden whitespace-nowrap text-[22px] font-black tracking-[-0.04em] text-blue-900 sm:inline">
+          <span className="whitespace-nowrap text-[18px] font-black tracking-[-0.045em] text-blue-900 sm:text-[22px] sm:tracking-[-0.04em]">
             Secrétariat<span className="text-blue-600">Pro</span>
           </span>
+          {showOctoberRoseRibbon && (
+            <Image
+              src="/octobre-rose/ruban-removebg-preview.png"
+              alt="Octobre Rose"
+              width={32}
+              height={40}
+              className="ml-0.5 h-9 w-7 shrink-0 object-contain drop-shadow-[0_1px_2px_rgba(157,23,77,0.38)] sm:h-10 sm:w-8"
+            />
+          )}
         </Link>
 
         {/* Desktop center navigation */}

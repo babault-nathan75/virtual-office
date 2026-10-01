@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from '@/components/Link';
+import { SITE_CONTACT_PHONE } from '@/lib/constants';
 
 export const metadata: Metadata = {
   title: 'Mentions légales — SecrétariatPro',
@@ -32,7 +33,7 @@ export default function MentionsLegales() {
               <li><b>Forme juridique :</b> [TODO — SARL, SAS, entreprise individuelle…]</li>
               <li><b>RCCM :</b> [TODO — votre numéro RCCM]</li>
               <li><b>Siège social :</b> [TODO — adresse complète à Abidjan]</li>
-              <li><b>Téléphone :</b> [TODO]</li>
+              <li><b>Téléphone :</b> <a href={`tel:${SITE_CONTACT_PHONE.replace(/\s/g, '')}`} className="text-blue-700 hover:underline">{SITE_CONTACT_PHONE}</a></li>
               <li><b>Email :</b> [TODO]</li>
               <li><b>Directeur de la publication :</b> [TODO — nom du responsable]</li>
             </ul>

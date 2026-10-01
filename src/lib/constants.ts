@@ -1,3 +1,5 @@
+export const SITE_CONTACT_PHONE = '+225 07 11 50 54 00';
+
 export const OUTILS = [
   'Word', 'Excel', 'PowerPoint',
   'Google Docs', 'Google Sheets',

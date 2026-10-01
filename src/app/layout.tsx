@@ -8,6 +8,7 @@ import Providers from "@/components/Providers";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { getSiteUrl } from "@/lib/env";
 import { OG_LOCALE } from '@/lib/i18n';
+import { OctoberRose } from "@/components/OctoberRose";
 
 const siteUrl = getSiteUrl();
 
@@ -121,6 +122,7 @@ export default function RootLayout({
             Aller au contenu principal
           </a>
           <Navbar />
+          <OctoberRose />
           <ToastContainer />
           <SpeedInsights />
           {children}

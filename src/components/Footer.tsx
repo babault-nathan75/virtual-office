@@ -3,6 +3,7 @@
 import Link from '@/components/Link';
 import { usePathname } from 'next/navigation';
 import { useRole, type Role } from '@/lib/roleStore';
+import { SITE_CONTACT_PHONE } from '@/lib/constants';
 
 const ROLE_LINKS: Record<Role, { label: string; href: string }[]> = {
   entreprise: [
@@ -37,6 +38,14 @@ export default function Footer() {
         <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
           <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-center text-sm text-slate-500 font-medium">
             <span className="text-slate-400">&copy; {new Date().getFullYear()} SecrétariatPro</span>
+            <span className="text-slate-300">&middot;</span>
+            <a
+              href={`tel:${SITE_CONTACT_PHONE.replace(/\s/g, '')}`}
+              className="text-blue-700 hover:text-blue-900 transition-colors duration-200"
+              aria-label={`Appeler SecrétariatPro au ${SITE_CONTACT_PHONE}`}
+            >
+              {SITE_CONTACT_PHONE}
+            </a>
             <span className="text-slate-300">&middot;</span>
             <Link href="/mentions-legales" className="hover:text-blue-700 transition-colors duration-200 underline underline-offset-2 decoration-transparent hover:decoration-blue-700">Mentions légales</Link>
             <span className="text-slate-300">&middot;</span>
