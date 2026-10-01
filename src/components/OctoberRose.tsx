@@ -236,6 +236,7 @@ export function OctoberRose() {
                 width={34}
                 height={34}
                 className={styles.cardRibbon}
+                unoptimized
               />
               Octobre Rose · Ensemble
             </p>
