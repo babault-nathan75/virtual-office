@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
+import { getMailProvider } from '@/lib/mailer';
 
 
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | 'timeout'> {
@@ -22,12 +23,15 @@ export async function GET() {
     checks.database = 'error';
   }
 
-  checks.smtp = process.env.SMTP_USER && process.env.SMTP_PASS ? 'configured' : 'not_configured';
+  // Le SMTP n'est qu'une voie parmi plusieurs : on rapporte le fournisseur
+  // effectivement sélectionné (Brevo > Resend > SMTP).
+  const provider = getMailProvider();
+  checks.smtp = provider !== 'none' ? `configured (${provider})` : 'not_configured';
   checks.redis = process.env.UPSTASH_REDIS_REST_URL ? 'configured' : 'not_configured';
   checks.vapid = process.env.VAPID_PUBLIC_KEY ? 'configured' : 'not_configured';
   checks.gemini = process.env.GEMINI_API_KEY ? 'configured' : 'not_configured';
 
-  const allOk = Object.values(checks).every(v => v === 'ok' || v === 'configured');
+  const allOk = Object.values(checks).every(v => v === 'ok' || v.startsWith('configured'));
 
   return NextResponse.json({
     status: allOk ? 'healthy' : 'degraded',

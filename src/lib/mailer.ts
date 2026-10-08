@@ -37,16 +37,11 @@ function getTransporter(): Transporter {
 /**
  * Fournisseur d'envoi.
  *
- * Gmail plafonne à environ 500 destinataires par jour. Avec un code à usage
- * unique demandé à chaque connexion, ce plafond est atteint vers 150 à 200
- * utilisateurs actifs quotidiens — et une fois atteint, ce sont les connexions
- * elles-mêmes qui cessent de fonctionner, pas seulement les notifications.
- *
- * Trois voies possibles, par ordre de priorité. Les deux API HTTP sont
- * préférables au SMTP en environnement sans serveur : elles n'ouvrent pas de
- * connexion longue, et surtout elles ne dépendent pas d'une adresse IP
- * d'origine — voir la note sur les IP autorisées plus bas.
+ * Ordre de priorité : Brevo > Resend > SMTP > none. Une défaillance de la
+ * voie d'API est rattrapée par le relais SMTP dans `sendMail` ; ici on ne
+ * décide que de la voie principale.
  */
+
 export type MailProvider = 'brevo' | 'resend' | 'smtp' | 'none';
 
 export function getMailProvider(): MailProvider {
@@ -108,83 +103,6 @@ export function getFromAddress(): FromAddress {
 /** Même adresse, au format d'en-tête RFC 5322. */
 export function formatFromHeader(from: FromAddress = getFromAddress()): string {
   return `"${from.name.replace(/"/g, '')}" <${from.email}>`;
-}
-
-type SendOptions = {
-  to: string;
-  subject: string;
-  html: string;
-  text?: string;
-};
-
-export async function sendMail({ to, subject, html, text }: SendOptions): Promise<void> {
-  const provider = getMailProvider();
-  if (provider === 'none') {
-    throw new Error(
-      "Aucun fournisseur d'email configuré (BREVO_API_KEY, RESEND_API_KEY, ou SMTP_USER + SMTP_PASS)."
-    );
-  }
-
-  const from = getFromAddress();
-
-  // Une alternative texte réduit nettement le score anti-spam d'un email
-  // purement HTML, et reste lisible sur les clients qui la préfèrent.
-  const plain = text ?? html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-
-  if (provider === 'brevo') {
-    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-      method: 'POST',
-      headers: {
-        'api-key': process.env.BREVO_API_KEY!,
-        'content-type': 'application/json',
-        accept: 'application/json',
-      },
-      body: JSON.stringify({
-        sender: { name: from.name, email: from.email },
-        to: [{ email: to }],
-        subject,
-        htmlContent: html,
-        textContent: plain,
-      }),
-    });
-
-    if (!response.ok) {
-      const detail = await response.text().catch(() => '');
-      throw new Error(`Brevo a refusé l'envoi (${response.status}) : ${detail.slice(0, 300)}`);
-    }
-    return;
-  }
-
-  if (provider === 'resend') {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: formatFromHeader(from),
-        to: [to],
-        subject,
-        html,
-        text: plain,
-      }),
-    });
-
-    if (!response.ok) {
-      const detail = await response.text().catch(() => '');
-      throw new Error(`Resend a refusé l'envoi (${response.status}) : ${detail.slice(0, 300)}`);
-    }
-    return;
-  }
-
-  await getTransporter().sendMail({
-    from: formatFromHeader(from),
-    to,
-    subject,
-    html,
-    text: plain,
-  });
 }
 
 /**
@@ -268,4 +186,129 @@ Ce code expire dans <strong>${expiresInMinutes} minutes</strong> et ne peut serv
 Ne le communiquez à personne : aucun membre de l'équipe SecrétariatPro ne vous le demandera.
 </p>`,
   });
+}
+
+type MailPayload = { to: string; subject: string; html: string; text: string };
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Envoi via l'API HTTP Brevo.
+ *
+ * Renvoie `null` en cas de succès, sinon le message d'erreur à joindre au
+ * rapport final. Les erreurs réseau sont attrapées ici pour que l'appelant
+ * puisse tenter le relais SMTP sans perdre la cause première.
+ */
+async function sendViaBrevo(from: FromAddress, payload: MailPayload): Promise<string | null> {
+  try {
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'api-key': process.env.BREVO_API_KEY!,
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        sender: { name: from.name, email: from.email },
+        to: [{ email: payload.to }],
+        subject: payload.subject,
+        htmlContent: payload.html,
+        textContent: payload.text,
+      }),
+    });
+    if (response.ok) return null;
+    const detail = await response.text().catch(() => '');
+    return `Brevo a refusé l'envoi (${response.status}) : ${detail.slice(0, 300)}`;
+  } catch (error) {
+    return `appel de l'API Brevo impossible : ${errorMessage(error)}`;
+  }
+}
+
+/** Envoi via l'API Resend — même contrat que `sendViaBrevo`. */
+async function sendViaResend(from: FromAddress, payload: MailPayload): Promise<string | null> {
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: formatFromHeader(from),
+        to: [payload.to],
+        subject: payload.subject,
+        html: payload.html,
+        text: payload.text,
+      }),
+    });
+    if (response.ok) return null;
+    const detail = await response.text().catch(() => '');
+    return `Resend a refusé l'envoi (${response.status}) : ${detail.slice(0, 300)}`;
+  } catch (error) {
+    return `appel de l'API Resend impossible : ${errorMessage(error)}`;
+  }
+}
+
+/**
+ * Envoi d'email avec repli automatique.
+ *
+ * Ordre de priorité : Brevo > Resend > SMTP (`getMailProvider`). Quand la voie
+ * d'API échoue — clé révoquée, adresse IP non autorisée par le fournisseur,
+ * panne transitoire — on retente via le relais SMTP s'il est configuré. Si
+ * toutes les voies échouent, l'exception joint chaque cause : « connection
+ * refused » seul ne dirait pas que Brevo a d'abord refusé la clé.
+ */
+export async function sendMail({ to, subject, html, text }: {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+}): Promise<void> {
+  const provider = getMailProvider();
+  if (provider === 'none') {
+    throw new Error(
+      "Aucun fournisseur d'email configuré (BREVO_API_KEY, RESEND_API_KEY, ou SMTP_USER + SMTP_PASS)."
+    );
+  }
+
+  const from = getFromAddress();
+
+  // Une alternative texte réduit nettement le score anti-spam d'un email
+  // purement HTML, et reste lisible sur les clients qui la préfèrent.
+  const plain = text ?? html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const payload: MailPayload = { to, subject, html, text: plain };
+
+  const failures: string[] = [];
+
+  if (provider === 'brevo') {
+    const failure = await sendViaBrevo(from, payload);
+    if (!failure) return;
+    failures.push(failure);
+  } else if (provider === 'resend') {
+    const failure = await sendViaResend(from, payload);
+    if (!failure) return;
+    failures.push(failure);
+  }
+
+  // Relais SMTP : voie directe (`provider === 'smtp'`) ou repli des API
+  // ci-dessus. La garde sur les deux variables évite qu' `env.smtpUser`
+  // lève « variable manquante » et masque la cause réelle de l'échec.
+  if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+    try {
+      await getTransporter().sendMail({
+        from: formatFromHeader(from),
+        to,
+        subject,
+        html,
+        text: plain,
+      });
+      return;
+    } catch (error) {
+      failures.push(`relais SMTP : ${errorMessage(error)}`);
+    }
+  }
+
+  throw new Error(`Envoi impossible à ${to} — ${failures.join(' ; ')}`);
 }

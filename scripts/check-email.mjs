@@ -17,7 +17,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { resolveTxt, resolveMx } from 'node:dns/promises';
+import { resolveTxt, resolveCname, resolveMx } from 'node:dns/promises';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -90,10 +90,15 @@ function parseFrom(value) {
  *
  * En cas d'échec du résolveur système, on retente via DNS-over-HTTPS, ce qui
  * contourne aussi les résolveurs qui filtrent ces types d'enregistrement.
+ *
+ * `type` permet de sonder les CNAME (DKIM Brevo moderne) autant que les TXT.
  */
-async function lookupTxt(name) {
+async function lookupTxt(name, type = 'TXT') {
   try {
-    return { status: 'ok', records: (await resolveTxt(name)).map(chunks => chunks.join('')) };
+    const records = type === 'CNAME'
+      ? (await resolveCname(name))
+      : (await resolveTxt(name)).map(chunks => chunks.join(''));
+    return { status: 'ok', records };
   } catch (error) {
     // ENODATA / ENOTFOUND : le domaine répond, mais n'a pas cet enregistrement.
     if (error.code === 'ENODATA' || error.code === 'ENOTFOUND') {
@@ -103,13 +108,15 @@ async function lookupTxt(name) {
 
   try {
     const response = await fetch(
-      `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=TXT`,
+      `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${type}`,
       { headers: { accept: 'application/dns-json' } }
     );
     if (!response.ok) return { status: 'unavailable', records: [] };
     const data = await response.json();
+    // 16 = TXT, 5 = CNAME (IANA DNS RRTYPE).
+    const expectedType = type === 'CNAME' ? 5 : 16;
     const records = (data.Answer ?? [])
-      .filter(answer => answer.type === 16)
+      .filter(answer => answer.type === expectedType)
       .map(answer => String(answer.data).replace(/^"|"$/g, '').replace(/" "/g, ''));
     return { status: 'ok', records };
   } catch {
@@ -255,17 +262,27 @@ async function main() {
       }
     }
 
-    // Brevo signe avec le sélecteur « mail ».
-    const dkimLookup = await lookupTxt(`mail._domainkey.${domain}`);
-    const dkim = dkimLookup.records;
-    if (dkimLookup.status === 'unavailable') {
+    // Brevo : deux générations de DKIM selon le compte. Les comptes récents
+    // publient deux CNAME (« brevo1 » / « brevo2 ») ; les anciens un TXT sur
+    // le sélecteur « mail ». On accepte les deux, faute de quoi le contrôle
+    // signalerait à tort un échec sur un domaine correctement configuré.
+    const brevoCnames = await Promise.all(
+      ['brevo1', 'brevo2'].map(selector =>
+        lookupTxt(`${selector}._domainkey.${domain}`, 'CNAME')
+      )
+    );
+    const legacyDkim = await lookupTxt(`mail._domainkey.${domain}`);
+
+    if (brevoCnames[0].status === 'unavailable' || legacyDkim.status === 'unavailable') {
       warn('DKIM non vérifiable : résolution DNS indisponible depuis ce poste.');
-    } else if (dkim.length === 0) {
-      warn('Aucun DKIM trouvé sur le sélecteur « mail » (celui de Brevo).');
-      info("  Si vous utilisez un autre fournisseur, le sélecteur diffère et ce test");
-      info('  ne s’applique pas. Sinon, ajoutez l’enregistrement fourni par Brevo.');
-    } else {
+    } else if (brevoCnames.some(l => l.records.length > 0)) {
+      ok('DKIM présent (CNAME Brevo « brevo1 / brevo2 »).');
+    } else if (legacyDkim.records.length > 0) {
       ok('DKIM présent sur le sélecteur « mail ».');
+    } else {
+      warn('Aucun enregistrement DKIM trouvé (ni « brevo1/brevo2 » ni « mail »).');
+      info("  Si vous utilisez un autre fournisseur, le sélecteur diffère et ce test");
+      info('  ne s’applique pas. Sinon, ajoutez les enregistrements fournis par Brevo.');
     }
 
     const dmarcLookup = await lookupTxt(`_dmarc.${domain}`);

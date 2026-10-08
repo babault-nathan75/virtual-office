@@ -213,14 +213,19 @@ export default function VerificationForm({ purpose, method, email, siteKey }: Pr
       <form
         onSubmit={event => {
           event.preventDefault();
-          void submit(code);
+          // Empêche l'envoi en double : la soumission se fait via onComplete
         }}
         className="space-y-6"
       >
         <OtpInput
           value={code}
           onChange={setCode}
-          onComplete={value => void submit(value)}
+          onComplete={value => {
+            // Auto-submit when 6 digits are complete, avoid double submission
+            if (value.length === CODE_LENGTH && !submittingRef.current) {
+              void submit(value);
+            }
+          }}
           disabled={loading}
           invalid={Boolean(error)}
           autoFocus

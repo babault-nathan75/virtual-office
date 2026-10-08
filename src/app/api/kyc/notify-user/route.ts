@@ -4,7 +4,7 @@ import { checkRateLimit } from '@/lib/rateLimit';
 import { escapeHtml } from '@/lib/sanitize';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
-import { sendMail } from '@/lib/mailer';
+import { sendMail, isMailConfigured } from '@/lib/mailer';
 
 
 
@@ -82,7 +82,7 @@ export async function POST(request: Request) {
   });
 
   // 2) Send email
-  if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+  if (isMailConfigured()) {
     try {
       const isRejected = statut === 'rejected';
       const bgColor = isRejected ? '#fef2f2' : '#f0fdf4';

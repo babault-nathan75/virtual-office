@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
-import { sendMail } from '@/lib/mailer';
+import { sendMail, isMailConfigured } from '@/lib/mailer';
 
 
 const SITE_URL =
@@ -48,9 +48,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Destinataire invalide' }, { status: 400 });
   }
 
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    console.error('[send-message-notification] SMTP credentials missing');
-    return NextResponse.json({ error: 'SMTP not configured' }, { status: 500 });
+  if (!isMailConfigured()) {
+    console.error('[send-message-notification] Aucun fournisseur email configuré');
+    return NextResponse.json({ error: 'Service email non configuré' }, { status: 500 });
   }
 
   const [{ data: recipient }, { data: senderProfile }] = await Promise.all([
