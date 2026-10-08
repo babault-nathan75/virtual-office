@@ -43,6 +43,9 @@ export const env = {
   get turnstileSiteKey() {
     return optional('NEXT_PUBLIC_TURNSTILE_SITE_KEY');
   },
+  get brevoApiKey() {
+    return optional('BREVO_API_KEY');
+  },
 };
 
 /**
