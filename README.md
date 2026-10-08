@@ -7,7 +7,7 @@ Plateforme de mise en relation entre entreprises et secrétaires qualifiées.
 - **Frontend** : Next.js 16, React 19, Tailwind CSS v4, TypeScript
 - **Backend** : Supabase (PostgreSQL, Auth, Storage, Realtime)
 - **IA** : Google Gemini (gemini-2.0-flash)
-- **Email** : Nodemailer (Gmail SMTP)
+- **Email** : Brevo (API HTTP, relais SMTP via Nodemailer)
 - **Déploiement** : Vercel
 
 ## Fonctionnalités

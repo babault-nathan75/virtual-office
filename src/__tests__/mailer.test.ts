@@ -36,7 +36,6 @@ beforeEach(() => {
   vi.stubEnv('SMTP_USER', 'b315a6001@smtp-brevo.com');
   vi.stubEnv('SMTP_PASS', 'cle-smtp');
   vi.stubEnv('BREVO_API_KEY', 'cle-api-brevo');
-  vi.stubEnv('RESEND_API_KEY', undefined);
 });
 
 describe('sendMail', () => {

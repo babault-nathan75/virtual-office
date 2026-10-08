@@ -202,9 +202,9 @@ utile pour tester l'élasticité au prix sans toucher au cœur.
   répètent à chaque affichage.
 - **SMTP Gmail** : plafonné à ~500 envois/jour. Avec un code OTP à chaque
   connexion, ce plafond se touche vers 150–200 utilisateurs actifs
-  quotidiens. Prévoir la bascule vers un service transactionnel
-  (Resend / Postmark / SES) **avant** d'atteindre ce seuil : `lib/mailer.ts`
-  est déjà le point de bascule unique.
+  quotidiens. La bascule vers un service transactionnel est faite :
+  `BREVO_API_KEY` (API HTTP, 300 envois/jour gratuits) en est la voie
+  principale, `lib/mailer.ts` reste le point de bascule unique.
 
 ---
 
@@ -233,7 +233,7 @@ utile pour tester l'élasticité au prix sans toucher au cœur.
   pages basculent en rendu dynamique, l'accueil reste pré-rendu.
 - Locale et pays unifiés sur la Côte d'Ivoire (`src/lib/i18n.ts`), là où vingt
   appels écrivaient `fr-FR` et schema.org déclarait la France.
-- Fournisseur d'email interchangeable : renseigner `RESEND_API_KEY` suffit à
+- Fournisseur d'email interchangeable : renseigner `BREVO_API_KEY` suffit à
   quitter le SMTP Gmail, sans toucher au code.
 - Première passe de découpage de `ChatWindow.tsx` : 4 045 → 3 187 lignes,
   42 tests ajoutés.

@@ -37,16 +37,15 @@ function getTransporter(): Transporter {
 /**
  * Fournisseur d'envoi.
  *
- * Ordre de priorité : Brevo > Resend > SMTP > none. Une défaillance de la
+ * Ordre de priorité : Brevo > SMTP > none. Une défaillance de la
  * voie d'API est rattrapée par le relais SMTP dans `sendMail` ; ici on ne
  * décide que de la voie principale.
  */
 
-export type MailProvider = 'brevo' | 'resend' | 'smtp' | 'none';
+export type MailProvider = 'brevo' | 'smtp' | 'none';
 
 export function getMailProvider(): MailProvider {
   if (process.env.BREVO_API_KEY) return 'brevo';
-  if (process.env.RESEND_API_KEY) return 'resend';
   if (process.env.SMTP_USER && process.env.SMTP_PASS) return 'smtp';
   return 'none';
 }
@@ -226,35 +225,10 @@ async function sendViaBrevo(from: FromAddress, payload: MailPayload): Promise<st
   }
 }
 
-/** Envoi via l'API Resend — même contrat que `sendViaBrevo`. */
-async function sendViaResend(from: FromAddress, payload: MailPayload): Promise<string | null> {
-  try {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: formatFromHeader(from),
-        to: [payload.to],
-        subject: payload.subject,
-        html: payload.html,
-        text: payload.text,
-      }),
-    });
-    if (response.ok) return null;
-    const detail = await response.text().catch(() => '');
-    return `Resend a refusé l'envoi (${response.status}) : ${detail.slice(0, 300)}`;
-  } catch (error) {
-    return `appel de l'API Resend impossible : ${errorMessage(error)}`;
-  }
-}
-
 /**
  * Envoi d'email avec repli automatique.
  *
- * Ordre de priorité : Brevo > Resend > SMTP (`getMailProvider`). Quand la voie
+ * Ordre de priorité : Brevo > SMTP (`getMailProvider`). Quand la voie
  * d'API échoue — clé révoquée, adresse IP non autorisée par le fournisseur,
  * panne transitoire — on retente via le relais SMTP s'il est configuré. Si
  * toutes les voies échouent, l'exception joint chaque cause : « connection
@@ -269,7 +243,7 @@ export async function sendMail({ to, subject, html, text }: {
   const provider = getMailProvider();
   if (provider === 'none') {
     throw new Error(
-      "Aucun fournisseur d'email configuré (BREVO_API_KEY, RESEND_API_KEY, ou SMTP_USER + SMTP_PASS)."
+      "Aucun fournisseur d'email configuré (BREVO_API_KEY ou SMTP_USER + SMTP_PASS)."
     );
   }
 
@@ -284,10 +258,6 @@ export async function sendMail({ to, subject, html, text }: {
 
   if (provider === 'brevo') {
     const failure = await sendViaBrevo(from, payload);
-    if (!failure) return;
-    failures.push(failure);
-  } else if (provider === 'resend') {
-    const failure = await sendViaResend(from, payload);
     if (!failure) return;
     failures.push(failure);
   }

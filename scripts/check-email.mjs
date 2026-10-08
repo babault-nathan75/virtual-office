@@ -144,14 +144,12 @@ async function main() {
   // --- Fournisseur --------------------------------------------------------
   const provider = env.BREVO_API_KEY
     ? 'brevo'
-    : env.RESEND_API_KEY
-      ? 'resend'
-      : env.SMTP_USER && env.SMTP_PASS
-        ? 'smtp'
-        : 'none';
+    : env.SMTP_USER && env.SMTP_PASS
+      ? 'smtp'
+      : 'none';
 
   if (provider === 'none') {
-    bad("Aucun fournisseur configuré (BREVO_API_KEY, RESEND_API_KEY, ou SMTP_USER + SMTP_PASS).");
+    bad("Aucun fournisseur configuré (BREVO_API_KEY ou SMTP_USER + SMTP_PASS).");
     process.exit(1);
   }
 

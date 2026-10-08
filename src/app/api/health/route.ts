@@ -24,7 +24,7 @@ export async function GET() {
   }
 
   // Le SMTP n'est qu'une voie parmi plusieurs : on rapporte le fournisseur
-  // effectivement sélectionné (Brevo > Resend > SMTP).
+  // effectivement sélectionné (Brevo > SMTP).
   const provider = getMailProvider();
   checks.smtp = provider !== 'none' ? `configured (${provider})` : 'not_configured';
   checks.redis = process.env.UPSTASH_REDIS_REST_URL ? 'configured' : 'not_configured';

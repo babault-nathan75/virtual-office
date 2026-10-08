@@ -225,7 +225,6 @@ NEXT_PUBLIC_SITE_URL=              # URL canonique
 NEXT_PUBLIC_TURNSTILE_SITE_KEY=
 TURNSTILE_SECRET_KEY=
 BREVO_API_KEY=                     # prioritaire ; API HTTP, sans contrainte d'IP
-RESEND_API_KEY=                    # sinon
 SMTP_USER=  SMTP_PASS=             # sinon : relais SMTP
 SMTP_HOST=  SMTP_PORT=             # ex. smtp-relay.brevo.com:587
 MAIL_FROM=                         # OBLIGATOIRE hors Gmail — voir §11
@@ -301,7 +300,7 @@ l'empreinte de tous les codes émis.
 
 | Point | Détail |
 |---|---|
-| Plafond SMTP Gmail | ~500 envois/jour. Avec les appareils de confiance (§3), le seuil recule d'environ un facteur dix. La bascule vers un fournisseur transactionnel reste câblée : `BREVO_API_KEY` ou `RESEND_API_KEY` suffit. |
+| Plafond SMTP Gmail | ~500 envois/jour. Avec les appareils de confiance (§3), le seuil recule d'environ un facteur dix. La bascule vers un fournisseur transactionnel reste câblée : `BREVO_API_KEY` suffit. |
 | Délivrabilité | Voir §11 — c'est le point qui décide du classement en indésirable, et il ne se règle pas en changeant de fournisseur. |
 | Taux d'abandon | Surveiller le rapport `login_password_ok` / `login_otp_ok` dans `auth_events` : l'écart mesure exactement la friction du second facteur. `login_trusted_device` donne la part des connexions dispensées. |
 | Perte d'un appareil | L'utilisateur doit révoquer depuis « Sécurité ». Sans cette action, la dispense court jusqu'à son terme. |
