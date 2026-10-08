@@ -12,7 +12,7 @@ import { z } from 'zod';
  */
 
 /** Longueur minimale d'un mot de passe pour un compte créé aujourd'hui. */
-export const PASSWORD_MIN_LENGTH = 8;
+export const PASSWORD_MIN_LENGTH = 12;
 
 /** Mots de passe trop courants / faciles à deviner (interdits). */
 export const COMMON_PASSWORDS = new Set([
@@ -32,6 +32,10 @@ export const strongPassword = z
   .regex(/[a-z]/, 'Le mot de passe doit contenir au moins une minuscule.')
   .regex(/[A-Z]/, 'Le mot de passe doit contenir au moins une majuscule.')
   .regex(/[0-9]/, 'Le mot de passe doit contenir au moins un chiffre.')
+  .regex(
+    /[^a-zA-Z0-9]/,
+    'Le mot de passe doit contenir au moins un caractère spécial (!@#$%^&*…).'
+  )
   .refine(
     (val) => !COMMON_PASSWORDS.has(val.toLowerCase()),
     'Ce mot de passe est trop courant. Choisissez-en un plus sûr.'

@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
 import PasswordInput from '@/components/PasswordInput';
+import { strongPassword, PASSWORD_MIN_LENGTH } from '@/lib/validations';
 
 export default function Reinitialisation() {
   const router = useRouter();
@@ -47,6 +48,13 @@ export default function Reinitialisation() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (mismatch) return;
+    // Le lien de réinitialisation ne doit pas devenir le trou dans la
+    // politique : même exigence que l'inscription (sinon « abcd12 » suffit).
+    const policy = strongPassword.safeParse(password);
+    if (!policy.success) {
+      setErrorMsg(policy.error.issues[0].message);
+      return;
+    }
     setLoading(true);
     setErrorMsg('');
 
@@ -113,7 +121,7 @@ export default function Reinitialisation() {
           {status === 'ready' && (
             <>
               <p className="text-sm text-slate-500 font-medium text-center mb-5">
-                Choisissez un nouveau mot de passe (6 caractères minimum).
+                Choisissez un nouveau mot de passe ({PASSWORD_MIN_LENGTH} caractères minimum, avec une majuscule, un chiffre et un caractère spécial).
               </p>
 
               {errorMsg && (
@@ -127,7 +135,7 @@ export default function Reinitialisation() {
                   <label className="block text-sm font-bold text-slate-700 mb-1.5">Nouveau mot de passe</label>
                   <PasswordInput
                     required
-                    minLength={6}
+                    minLength={PASSWORD_MIN_LENGTH}
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     placeholder="••••••••"
@@ -151,7 +159,7 @@ export default function Reinitialisation() {
 
                 <button
                   type="submit"
-                  disabled={loading || mismatch || password.length < 6}
+                  disabled={loading || mismatch || !strongPassword.safeParse(password).success}
                   className="w-full py-4 rounded-full text-white font-extrabold tracking-tight text-base bg-blue-600 hover:bg-blue-700 transition shadow-lg shadow-blue-200 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {loading ? 'Mise à jour...' : 'Définir le nouveau mot de passe'}

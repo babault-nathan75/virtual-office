@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import Link from '@/components/Link';
 import PasswordInput from '@/components/PasswordInput';
 import { formatDate } from '@/lib/i18n';
+import { strongPassword, PASSWORD_MIN_LENGTH } from '@/lib/validations';
 
 type Profil = {
   id: string;
@@ -168,8 +169,11 @@ export default function Profile() {
   const handlePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage({ text: '', type: '' });
-    if (newPassword.length < 6) {
-      setMessage({ text: 'Le mot de passe doit faire au moins 6 caractères.', type: 'error' });
+    // Même politique que l'inscription : sans elle, un compte sécurisé à la
+    // création repasserait à « abcd12 » depuis ce formulaire.
+    const policy = strongPassword.safeParse(newPassword);
+    if (!policy.success) {
+      setMessage({ text: policy.error.issues[0].message, type: 'error' });
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -363,7 +367,7 @@ export default function Profile() {
               <label className="block text-sm font-bold text-slate-700 mb-1.5">Nouveau mot de passe</label>
               <PasswordInput
                 required
-                minLength={6}
+                minLength={PASSWORD_MIN_LENGTH}
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
                 placeholder="••••••••"
@@ -387,7 +391,7 @@ export default function Profile() {
 
             <button
               type="submit"
-              disabled={savingPassword || !newPassword || passwordMismatch}
+              disabled={savingPassword || !strongPassword.safeParse(newPassword).success || passwordMismatch}
               className="w-full py-3.5 rounded-full bg-slate-900 hover:bg-blue-700 text-white font-extrabold tracking-tight text-sm transition shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {savingPassword ? 'Mise à jour...' : 'Changer mon mot de passe'}

@@ -2,9 +2,9 @@ name: CI/CD
 
 on:
   push:
-    branches: [main]
+    branches: [master, main]
   pull_request:
-    branches: [main]
+    branches: [master, main]
 
 jobs:
   lint-and-build:
@@ -47,7 +47,12 @@ jobs:
       - run: npm audit --audit-level=high
       - name: Check for secrets in code
         run: |
-          if grep -r "sk_live_\|sk_test_\|password.*=.*['\"]" src/ --include="*.ts" --include="*.tsx" --include="*.js" 2>/dev/null; then
+          # Motifs précis : un pattern large comme « password.*=.*['"] »
+          # matchait `htmlFor="password" className="…"` et faisait échouer
+          # la CI sur du code innocent. Les fixtures de tests sont exclues :
+          # un mot de passe factice dans un test n'est pas une fuite.
+          if grep -rE "sk_live_[0-9A-Za-z]|sk_test_[0-9A-Za-z]|xkeysib-[0-9A-Za-z]|xsmtpsib-[0-9A-Za-z]|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY" src/ --include="*.ts" --include="*.tsx" --include="*.js" 2>/dev/null \
+            || grep -rE "password[[:space:]]*[:=][[:space:]]*['\"][^'\"]{8,}['\"]" src/ --include="*.ts" --include="*.tsx" --include="*.js" --exclude-dir=__tests__ 2>/dev/null; then
             echo "WARNING: Potential secrets found in code"
             exit 1
           fi

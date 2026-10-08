@@ -1,45 +1,44 @@
 import { describe, it, expect } from 'vitest';
+import { getStrength } from '@/components/PasswordStrength';
 
-function getStrength(password: string): { score: number; label: string } {
-  let score = 0;
-  if (password.length >= 6) score++;
-  if (password.length >= 10) score++;
-  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score++;
-  if (/\d/.test(password)) score++;
-  if (/[^a-zA-Z0-9]/.test(password)) score++;
-
-  if (score <= 1) return { score, label: 'Faible' };
-  if (score <= 2) return { score, label: 'Moyen' };
-  if (score <= 3) return { score, label: 'Bon' };
-  return { score, label: 'Excellent' };
-}
-
+/*
+ * On teste la vraie implémentation du composant. La version précédente
+ * redéfinissait `getStrength` en local avec d'autres seuils (6/10 au lieu
+ * de 8/12) : le test passait quel que soit le comportement réel.
+ */
 describe('getStrength', () => {
-  it('returns Faible for weak password', () => {
+  it('classe un mot de passe très court en Trop faible', () => {
     const result = getStrength('abc');
-    expect(result.label).toBe('Faible');
+    expect(result.label).toBe('Trop faible');
     expect(result.score).toBeLessThanOrEqual(1);
+    // Un simple mot de passe court n'est PAS « trop courant » :
+    // c'était le bug de hasCommon forcé à true dans le composant.
+    expect(result.hasCommon).toBe(false);
   });
 
-  it('returns Moyen for medium password', () => {
-    const result = getStrength('abcdef1');
+  it('signale un mot de passe de la liste interdite', () => {
+    const result = getStrength('azerty123');
+    expect(result.hasCommon).toBe(true);
+    expect(result.label).toBe('Trop faible');
+  });
+
+  it('monte en Moyen des que la base est reunie', () => {
+    // 8 caracteres, casse mixte, chiffre — sans caractere special.
+    const result = getStrength('Abcdef12');
+    expect(result.score).toBe(3);
     expect(result.label).toBe('Moyen');
   });
 
-  it('returns Bon for good password', () => {
-    const result = getStrength('Abcdef12');
-    expect(result.label).toBe('Bon');
-    expect(result.score).toBe(3);
-  });
-
-  it('returns Excellent for strong password', () => {
-    const result = getStrength('Abcdef12!!');
-    expect(result.label).toBe('Excellent');
+  it('classe un mot de passe conforme a la politique en Fort', () => {
+    // 12 caracteres, minuscule + majuscule + chiffre + special.
+    const result = getStrength('Abcdef12!xyz');
     expect(result.score).toBe(5);
+    expect(result.label).toBe('Fort');
   });
 
-  it('returns Faible for empty string', () => {
+  it('renvoie Trop faible pour une chaine vide', () => {
     const result = getStrength('');
-    expect(result.label).toBe('Faible');
+    expect(result.label).toBe('Trop faible');
+    expect(result.score).toBeLessThanOrEqual(1);
   });
 });

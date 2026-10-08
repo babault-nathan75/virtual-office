@@ -2,7 +2,13 @@
 
 import { COMMON_PASSWORDS } from '@/lib/validations';
 
-function getStrength(password: string): { score: number; label: string; color: string; hasCommon: boolean } {
+/**
+ * Force d'un mot de passe, exportée pour être testée telle quelle.
+ *
+ * Le test redéfinissait une copie locale avec d'autres seuils : il passait
+ * quel que soit le comportement réel du composant.
+ */
+export function getStrength(password: string): { score: number; label: string; color: string; hasCommon: boolean } {
   let score = 0;
   const hasCommon = COMMON_PASSWORDS.has(password.toLowerCase());
   if (password.length >= 8) score++;
@@ -12,7 +18,7 @@ function getStrength(password: string): { score: number; label: string; color: s
   // special char is optional but adds strength
   if (/[^a-zA-Z0-9]/.test(password)) score++;
 
-  if (hasCommon || score <= 1) return { score: Math.min(score, 1), label: 'Trop faible', color: 'bg-red-500', hasCommon: true };
+  if (hasCommon || score <= 1) return { score: Math.min(score, 1), label: 'Trop faible', color: 'bg-red-500', hasCommon };
   if (score <= 2) return { score, label: 'Faible', color: 'bg-red-500', hasCommon };
   if (score <= 3) return { score, label: 'Moyen', color: 'bg-amber-500', hasCommon };
   if (score <= 4) return { score, label: 'Bon', color: 'bg-blue-500', hasCommon };

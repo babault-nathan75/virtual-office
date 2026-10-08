@@ -43,12 +43,21 @@ export function useAutoRefresh(
   // La fonction de rechargement est souvent recréée à chaque rendu. La garder
   // dans une ref évite de réinstaller les écouteurs à chaque fois — ce qui, sur
   // un intervalle, reviendrait à le redémarrer sans cesse et à ne jamais le
-  // déclencher.
+  // déclencher. L'affectation vit dans un effet : écrire dans une ref pendant
+  // le rendu empêche le compilateur React de raisonner sur le composant.
   const refreshRef = useRef(refresh);
-  refreshRef.current = refresh;
+  useEffect(() => {
+    refreshRef.current = refresh;
+  }, [refresh]);
 
-  const lastRunRef = useRef(Date.now());
+  // Dernier rechargement réussi, initialisé au montage. `Date.now()` reste
+  // hors du rendu (impur) : les données fraîchement affichées ne déclenchent
+  // pas un rechargement immédiat au premier retour sur l'onglet.
+  const lastRunRef = useRef<number | null>(null);
   const runningRef = useRef(false);
+  useEffect(() => {
+    lastRunRef.current = Date.now();
+  }, []);
 
   const run = useCallback(async () => {
     // Un rechargement déjà en cours : inutile d'en lancer un second, il
@@ -68,7 +77,7 @@ export function useAutoRefresh(
 
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
-      if (Date.now() - lastRunRef.current < staleAfterMs) return;
+      if (lastRunRef.current !== null && Date.now() - lastRunRef.current < staleAfterMs) return;
       void run();
     };
 

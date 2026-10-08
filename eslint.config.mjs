@@ -49,6 +49,27 @@ const eslintConfig = defineConfig([
     },
   },
   {
+    /*
+     * Règles du React Compiler, amenées par eslint-plugin-react-hooks 7
+     * (via eslint-config-next 16.4). Elles signalent ici du code antérieur :
+     * effets de chargement de données qui réinitialisent l'état (la forme
+     * historique de la messagerie, des dashboards et de TrustedDevices),
+     * composant `Avatar` défini dans le rendu de Navbar, et `Date.now()`
+     * dans l'envoi optimiste de ChatWindow.
+     *
+     * Corriger ces sites sans test navigateur sur la messagerie ferait plus
+     * de mal que de bien — le découpage de ChatWindow et Navbar est à l'ordre
+     * du jour (ARCHITECTURE §5). On garde donc les violations visibles en
+     * « warn » (la CI ne casse pas) plutôt que de les taire.
+     */
+    rules: {
+      "react-hooks/set-state-in-effect": "warn",
+      "react-hooks/static-components": "warn",
+      "react-hooks/purity": "warn",
+      "react-hooks/refs": "warn",
+    },
+  },
+  {
     // Le service worker et les scripts hors application ne disposent pas du
     // routeur Next : la règle ne s'y applique pas.
     files: ["public/**", "scripts/**"],

@@ -69,3 +69,9 @@ npm run test:watch
 - `npm run start` — Démarrer le build
 - `npm run lint` — Linter le code
 - `npm run test` — Lancer les tests
+- `npm run test:e2e` — Tests end-to-end Playwright
+- `npm run db:migrate` — Appliquer les migrations Supabase
+- `npm run db:reset` — Réinitialiser la base locale (CLI Supabase)
+- `npm run check:email` — Vérifier la config d'envoi et la délivrabilité (SPF/DKIM/DMARC)
+- `npm run check:turnstile` — Vérifier les clés Turnstile
+- `npm run analyze` — Analyser le bundle
