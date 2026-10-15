@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { sendMail, renderEmailLayout } from '@/lib/mailer';
+import { escapeHtml } from '@/lib/sanitize';
 
 function getSupabaseAdmin() {
   return createClient(
@@ -120,7 +121,10 @@ export async function POST(req: NextRequest) {
       await Promise.all(
         batch.map(async (sec) => {
           try {
-            const personalizedHtml = html.replace(/\{\{nom\}\}/g, sec.nom || 'Secrétaire');
+            // Le nom est saisi par l'utilisatrice elle-même : inséré brut dans
+            // le HTML, « <a href=…> » y deviendrait un lien de hameçonnage
+            // envoyé sous la signature de la plateforme.
+            const personalizedHtml = html.replace(/\{\{nom\}\}/g, escapeHtml(sec.nom || 'Secrétaire'));
             const personalizedText = text?.replace(/\{\{nom\}\}/g, sec.nom || 'Secrétaire');
             
             await sendMail({

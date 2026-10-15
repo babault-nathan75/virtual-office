@@ -3,11 +3,14 @@ import { getAuthenticatedUser } from '@/lib/auth';
 import { z } from 'zod';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
+import { isAllowedPushEndpoint } from '@/lib/pushEndpoint';
 
 
 const subscribeSchema = z.object({
   userId: z.string().uuid(),
-  endpoint: z.string().url(),
+  // Le serveur enverra des requêtes vers cette adresse : elle doit désigner un
+  // service push de navigateur, jamais une adresse interne (SSRF).
+  endpoint: z.string().url().max(1000).refine(isAllowedPushEndpoint),
   p256dh: z.string().min(1),
   auth: z.string().min(1),
 });
@@ -18,7 +21,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Trop de requêtes.' }, { status: 429 });
   }
 
-  const body = await request.json();
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Corps de requête invalide' }, { status: 400 });
+  }
   const parsed = subscribeSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: 'Données invalides' }, { status: 400 });

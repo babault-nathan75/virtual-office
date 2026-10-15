@@ -13,6 +13,19 @@ const exportSchema = z.object({
   format: z.enum(['csv', 'pdf']).optional(),
 });
 
+/**
+ * Cellule CSV sûre.
+ *
+ * Un message commençant par `=`, `+`, `-`, `@` (ou tabulation / retour) est
+ * interprété comme une formule par Excel et LibreOffice à l'ouverture du
+ * fichier : `=HYPERLINK("https://…")` ou `=cmd|…` s'exécuteraient chez la
+ * personne qui exporte. Le préfixe `'` force l'affichage en texte.
+ */
+function csvCell(value: string): string {
+  const neutralized = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return `"${neutralized.replace(/"/g, '""')}"`;
+}
+
 export async function POST(request: Request) {
   const rateLimitResult = await checkRateLimit(`msg-export:${getClientIp(request)}`, 5, 60000);
   if (!rateLimitResult.allowed) {
@@ -69,7 +82,7 @@ export async function POST(request: Request) {
       ...messages.map(m => [
         formatDateTime(m.created_at),
         m.sender_id === userId ? senderName : otherName,
-        `"${m.content.replace(/"/g, '""')}"`,
+        csvCell(m.content),
         m.read_at ? formatDateTime(m.read_at) : 'Non lu',
       ]),
     ];

@@ -4,6 +4,8 @@ import { requireAuth } from '@/lib/auth';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
+import { safeInternalPath } from '@/lib/safeRedirect';
+import { isAllowedPushEndpoint } from '@/lib/pushEndpoint';
 
 
 if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
@@ -76,7 +78,7 @@ export async function POST(request: Request) {
 
   // L'URL est contrainte à un chemin interne : une URL absolue permettrait
   // d'ouvrir un site tiers depuis une notification signée par l'application.
-  const safeUrl = url && url.startsWith('/') && !url.startsWith('//') ? url : '/dashboard/messages';
+  const safeUrl = safeInternalPath(url) ?? '/dashboard/messages';
 
   if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
     return NextResponse.json({ error: 'Push non configuré' }, { status: 503 });
@@ -95,6 +97,12 @@ export async function POST(request: Request) {
   const results = [];
 
   for (const sub of subs) {
+    // Défense en profondeur : un abonnement enregistré avant la validation de
+    // /api/push/subscribe ne doit pas permettre de joindre une adresse interne.
+    if (!isAllowedPushEndpoint(sub.endpoint)) {
+      results.push({ sent: false });
+      continue;
+    }
     try {
       await webPush.sendNotification(
         { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },

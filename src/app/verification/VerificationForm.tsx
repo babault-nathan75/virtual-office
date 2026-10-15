@@ -9,6 +9,10 @@ import { AuthAlert } from '@/components/AuthShell';
 import { Button } from '@/components/ui';
 import { clearCachedRole } from '@/lib/roleStore';
 import { trackEvent } from '@/lib/analytics';
+// Une destination venue de l'URL est contrôlée par l'attaquant : sans ce
+// filtre, `?suivant=https://exemple-malveillant.test` transformerait l'écran
+// de connexion en tremplin de redirection ouverte (voir src/lib/safeRedirect.ts).
+import { safeInternalPath } from '@/lib/safeRedirect';
 
 const CODE_LENGTH = 6;
 
@@ -27,21 +31,6 @@ type Props = {
  * l'adresse email et active le compte) et connexion (le code constitue le
  * second facteur, exigé à chaque ouverture de session).
  */
-/**
- * N'accepte qu'un chemin interne.
- *
- * Une destination venue de l'URL est contrôlée par l'attaquant : sans ce
- * filtre, `?suivant=https://exemple-malveillant.test` transformerait l'écran
- * de connexion en tremplin de redirection ouverte — un classique du
- * hameçonnage, d'autant plus crédible qu'il part du vrai domaine.
- */
-function safeInternalPath(value: string | null): string | null {
-  if (!value) return null;
-  if (!value.startsWith('/') || value.startsWith('//')) return null;
-  if (value.includes('\\')) return null;
-  return value;
-}
-
 export default function VerificationForm({ purpose, method, email, siteKey }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();

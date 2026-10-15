@@ -13,20 +13,11 @@ import { supabase } from '@/lib/supabaseClient';
 import { trackEvent } from '@/lib/analytics';
 import { clearCachedRole, getCachedRole, roleHome } from '@/lib/roleStore';
 import { connexionSchema, type ConnexionFormData } from '@/lib/validations';
+// N'accepte qu'un chemin interne : une destination venue de l'URL est
+// contrôlée par l'attaquant (voir src/lib/safeRedirect.ts).
+import { safeInternalPath } from '@/lib/safeRedirect';
 
 type Props = { siteKey: string };
-
-/**
- * N'accepte qu'un chemin interne : une destination venue de l'URL est
- * contrôlée par l'attaquant, et sans ce filtre la connexion deviendrait un
- * tremplin de redirection ouverte depuis le vrai domaine.
- */
-function safeInternalPath(value: string): string | null {
-  if (!value) return null;
-  if (!value.startsWith('/') || value.startsWith('//')) return null;
-  if (value.includes('\\')) return null;
-  return value;
-}
 
 export default function ConnexionForm({ siteKey }: Props) {
   const router = useRouter();
