@@ -1,0 +1,15 @@
+# Empêche la mise en pause du projet Supabase (plan gratuit : pause après
+# ~7 jours sans activité). /api/health fait une vraie requête en base.
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: '0 8 * * *' # tous les jours à 8h UTC
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /api/health
+        run: curl -fsS --retry 3 --max-time 30 "${{ secrets.HEALTH_URL }}"
